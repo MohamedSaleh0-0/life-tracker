@@ -7,7 +7,7 @@ Covers accounts, transactions (expense/income/transfer/adjustment), hierarchical
 - As a user, I want to track multiple accounts and log expenses/income/transfers/balance adjustments, so my balances stay accurate.
 - As a user, I want hierarchical categories, separate for expenses and income, so I can organize spending meaningfully.
 - As a user, I want recurring bills/income flagged when due, so I don't forget to log them.
-- As a user, I want shopping lists with pending items and purchase history, so shopping and spending stay connected.
+- As a user, I want shopping lists with pending items and purchase history, so shopping and spending stay connected — including having a purchase automatically reflected in my accounts once I buy it.
 - As a user, I want charts and insights about my spending and net worth, not just raw totals.
 - As a user, I want full control over which charts/features are visible, so the dashboard matches how I actually use it.
 
@@ -44,7 +44,7 @@ Covers accounts, transactions (expense/income/transfer/adjustment), hierarchical
 ### Shopping Lists
 - REQ-M021: The system shall allow the user to create multiple named shopping lists.
 - REQ-M022: A shopping list item shall have name, category, quantity, estimated price, an optional note, and a status of pending or bought.
-- REQ-M023: When the user marks a pending item as bought, the system shall prompt for actual price, account, and purchase date, and move the item into that list's purchase history.
+- REQ-M023: When the user marks a pending item as bought, the system shall prompt for actual price, account, and purchase date, shall automatically create a linked expense transaction using those values (account, price as amount, purchase date, and the item's category), and shall move the item into that list's purchase history.
 - REQ-M024: The system shall display, per shopping list, a pending-item count and the estimated-price total of pending items.
 - REQ-M025: The system shall display each list's purchase history as a section separate from (and collapsible relative to) its pending items.
 
@@ -57,6 +57,7 @@ Covers accounts, transactions (expense/income/transfer/adjustment), hierarchical
 - REQ-M031: The system shall display each account's share of total positive balance as a chart, and shall list negative-balance accounts separately since they can't be represented as a pie/donut slice.
 - REQ-M032: The system shall provide a full, searchable, filterable (by account and type) transaction history, embedded in the dashboard rather than a separate view.
 - REQ-M033: The system shall allow the user to independently show or hide each chart type on the finance dashboard via settings.
+- REQ-M034: If the user deletes a transaction that was auto-created from a shopping-list purchase (REQ-M023), the system shall revert that shopping item back to pending status (proposed default — flag if you'd rather the item simply stay "bought" with no linked transaction).
 
 ## Non-Functional Requirements
 - Performance, security, and platform requirements follow PROJECT_PRINCIPLES.md; no finance-specific additions identified.
@@ -69,9 +70,9 @@ Covers accounts, transactions (expense/income/transfer/adjustment), hierarchical
 ## Edge Cases & Error Handling
 - A recurring entry's category is later deleted: relabeled "Uncategorized," same handling as REQ-M015.
 - A shopping list item is deleted while still pending: allowed, no balance/transaction impact since nothing was logged yet.
+- A transaction auto-created from a shopping purchase is later deleted: the source shopping item reverts to pending, per REQ-M034.
 
 ## Open Questions
-- **Shopping ↔ transaction linkage:** does marking a shopping item "bought" automatically create a linked expense transaction (using the account/price/date captured at purchase), or are shopping spend and the transaction ledger tracked independently, with the user separately logging the expense if they want it reflected in balances? This materially affects account-balance accuracy and needs a decision before design.
 - **"Goal/target progress" for Money Management:** you selected this as a wanted insight type, but no budget or savings-target feature existed in the prior implementation. Does this mean: a per-category budget (e.g. "$300/mo on Food, 80% used"), a savings goal (e.g. "$5,000 emergency fund, 60% there"), or something else?
 - **"Streak/consistency insight" for Money Management:** you also selected this, but it doesn't map as directly onto money as it does onto habits. Candidates: a no-spend-day streak, spending pace vs. typical pace for the period, or something else — needs your steer before this becomes a requirement rather than a guess.
 - **Cross-currency transfers:** explicitly out of scope per the non-goal above, or should a transfer between two differently-curr­ency accounts be supported with a manual exchange rate?
