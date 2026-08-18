@@ -14,12 +14,13 @@ This document covers cross-cutting product-level requirements. Each module (Habi
 - As a user, I want dedicated deeper views per module (Habits, Data Points, Finance, Transactions, Shopping Lists, Settings), so I can dig into history and trends without cluttering the daily view.
 - As a user, I want to enable/disable whole modules, and individual features/charts within a module, independently, so the plugin matches exactly how I want to use it.
 - As a user, I want statistical insights (goal/target progress, streaks and consistency) rather than just raw numbers, so I understand how I'm doing at a glance.
+- As a user, I want a consistent "week starts on" setting applied everywhere weekdays matter, so schedules and periods line up with how I actually think about my week.
 - As a user on mobile, I want full parity with desktop.
 
 ## Functional Requirements (EARS)
 
 ### Dashboard & Navigation
-- REQ-C001: The plugin shall provide a "Today" view summarizing, for the current day: pending/completed habits, logged/unlogged data points, today's spending, and any recurring finance entries due for review.
+- REQ-C001: The plugin shall provide a "Today" view summarizing, for the current day: pending/completed habits, data points logged today (showing entry count where a data point has multiple entries) vs. not yet logged, today's spending, and any recurring finance entries due for review.
 - REQ-C002: The plugin shall provide dedicated per-module views (Habits, Data Points, Finance/Transactions, Shopping Lists, Settings), reachable via navigation, separate from the Today view.
 - REQ-C003: While viewing Today or a per-module view, the system shall apply a shared period selector (Day/Week/Month/Year/Custom range) to any content in that view that is period-scoped.
 
@@ -28,6 +29,9 @@ This document covers cross-cutting product-level requirements. Each module (Habi
 - REQ-C005: When a module is disabled, the system shall hide its views, dashboard widgets, and navigation entry without deleting previously recorded data for that module.
 - REQ-C006: The plugin shall allow individual optional features within an enabled module (e.g. satisfaction tracking, a specific chart type, a specific dashboard card) to be independently toggled in settings.
 - REQ-C007: The system shall apply sensible defaults for every toggleable feature, so the plugin is usable immediately without requiring settings configuration first.
+
+### Cross-Cutting Settings
+- REQ-C017: The system shall provide a single "week starts on" setting (Sunday or Monday), defaulting to Monday, applied consistently across all weekday-based scheduling, streak/completion-rate calculations, and period calculations in every module — no module shall hardcode its own first-day-of-week assumption.
 
 ### Data Storage (see PROJECT_PRINCIPLES.md for full rationale)
 - REQ-C008: The system shall store all module definitions/configuration in the plugin's settings store.
@@ -65,6 +69,7 @@ This document covers cross-cutting product-level requirements. Each module (Habi
 - [ ] The Today view displays accurate summary data for all 3 enabled modules simultaneously.
 - [ ] Disabling a module hides its UI; re-enabling it restores all previously recorded data unchanged.
 - [ ] At least one feature-level toggle (e.g. satisfaction tracking) demonstrably changes the UI when switched off.
+- [ ] Changing "week starts on" demonstrably shifts weekday pickers, streak/completion-rate math, and period boundaries consistently across all modules.
 - [ ] All criteria above hold identically on Obsidian desktop and Obsidian mobile.
 - [ ] No network requests are made by the plugin at runtime, verified via network monitoring during manual testing.
 
@@ -74,6 +79,7 @@ This document covers cross-cutting product-level requirements. Each module (Habi
 - Charting library choice (Chart.js vs. Recharts vs. other) — deferred to each module's design.md.
 - Whether period-over-period comparison or forecasting insights get added in a later phase.
 - Deferred module candidates from earlier discussion (journaling, subscriptions, goals, reading log, relationships) — none in scope now.
+- **Multi-currency aggregation (deferred to design.md):** Money Management allows each account its own currency (REQ-M001) but explicitly excludes cross-currency conversion (see that module's Non-Goals). As written, several finance requirements (total balance, net-worth chart, account-balance-share chart) implicitly assume aggregation across accounts, which only cleanly works if those accounts share a currency. This needs a concrete resolution in Money Management's design.md — e.g. restricting aggregate views to a single "primary" currency with other-currency accounts shown separately, or grouping aggregates per-currency instead of blending them — before that part of the dashboard is built.
 
 ## Approval
 - [ ] Approved by user on <date>
