@@ -10,6 +10,8 @@
 - **Definitions/config** (accounts, categories, habit definitions, data point definitions, recurring entry definitions, shopping list names, plugin preferences) → plugin settings (`data.json`).
 - **Logged/time-series data** (transactions, habit check-ins, data point entries) → plain markdown files, one line per entry, Dataview-style inline fields (e.g. `- 2026-08-10 [account:: wallet] [amount:: -45] [category:: Food/Snacks]`).
 - Habit/data-point logs specifically: one markdown line per day (not per habit/point), with each item's own id as the inline-field key.
+- Each module owns its own log file(s) — habit check-ins, data point entries, and transactions are never interleaved in the same file. Keeps Dataview queries scoped to one concern and keeps module enable/disable (see requirements-product-vision.md) from touching other modules' data.
+- Large log files are split by calendar year (e.g. `habits-2026.md`) to bound individual file size and git-diff size as history accumulates. Applies per module, decided per module's design.md but following this same convention.
 - Rationale: Dataview-queryability, git-diffability, hand-editability, and mobile-safety (plain file I/O, no native DB binding). Chosen deliberately over an internal JSON store + generated summary — one source of truth, not two.
 - Account balances change only via a recorded transaction (including a dedicated "adjustment" type) — never by editing a stored number directly.
 - All "what is today" date logic goes through one shared function using local date parts — never UTC-based parsing (`.toISOString()`), which previously caused day-rollover bugs for UTC+2/+3 users.
