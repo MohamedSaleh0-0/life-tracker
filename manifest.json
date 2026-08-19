@@ -1,0 +1,10 @@
+{
+  "id": "life-tracker",
+  "name": "Life Tracker",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Habit tracking, data point tracking, and money management, built for power users who want maximal control over their life-tracking data — stored as plain, hand-editable, Dataview-queryable markdown.",
+  "author": "Mohamed Saleh",
+  "authorUrl": "https://github.com/MohamedSaleh0-0",
+  "isDesktopOnly": false
+}
