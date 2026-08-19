@@ -3,14 +3,14 @@
 Each task references the REQ ID(s) and design section it fulfills. Ordered bottom-up through the layered architecture (domain → infrastructure → application → ui), so each layer is testable before the next is built on top of it. Check off as completed.
 
 ## Scaffolding
-- [ ] TASK-001: Create `src/modules/habit-tracking/` with `domain/`, `application/`, `infrastructure/`, `ui/` subfolders, matching PROJECT_PRINCIPLES.md's layered convention. (design §Architecture Overview)
+- [x] TASK-001: Create `src/modules/habit-tracking/` with `domain/`, `application/`, `infrastructure/`, `ui/` subfolders, matching PROJECT_PRINCIPLES.md's layered convention. (design §Architecture Overview)
 
 ## Domain (pure logic, no I/O)
-- [ ] TASK-002: Define core types — `HabitDefinition`, `HabitSchedule`, `DayStatus`. (REQ-H001–H003, design §Data Model)
-- [ ] TASK-003: Implement `scheduleEvaluator.isScheduledOn(habit, date, weekStartsOn)` across all three schedule modes (daily / weekdays / weeklyQuota), excluding any date before `habit.createdAt`. (REQ-H003, REQ-C017, design §Architecture, §Error Handling)
-- [ ] TASK-004: Unit tests for `scheduleEvaluator` — all 3 modes × both `weekStartsOn` values, plus the pre-creation-date exclusion case. (design §Test Strategy)
-- [ ] TASK-005: Implement `streakCalculator` — `currentStreak`, `longestStreak`, `completionRate`, operating on a day-classification sequence from `scheduleEvaluator`. (REQ-H009–H011, design §Architecture)
-- [ ] TASK-006: Unit tests for `streakCalculator` — missed-day reset, a not-scheduled day *not* breaking a streak, completion rate across multiple selectable ranges. (design §Test Strategy)
+- [x] TASK-002: Define core types — `HabitDefinition`, `HabitSchedule`, `DayStatus`. (REQ-H001–H003, design §Data Model)
+- [x] TASK-003: Implement `scheduleEvaluator.isScheduledOn(habit, date, weekStartsOn)` across all three schedule modes (daily / weekdays / weeklyQuota), excluding any date before `habit.createdAt`. (REQ-H003, REQ-C017, design §Architecture, §Error Handling)
+- [x] TASK-004: Unit tests for `scheduleEvaluator` — all 3 modes × both `weekStartsOn` values, plus the pre-creation-date exclusion case. (design §Test Strategy) — 13 tests, all passing.
+- [x] TASK-005: Implement `streakCalculator` — `currentStreak`, `longestStreak`, `completionRate`, operating on a day-classification sequence from `scheduleEvaluator`. (REQ-H009–H011, design §Architecture)
+- [x] TASK-006: Unit tests for `streakCalculator` — missed-day reset, a not-scheduled day *not* breaking a streak, completion rate across multiple selectable ranges. (design §Test Strategy) — 8 tests, all passing.
 
 ## Infrastructure (Obsidian file I/O)
 - [ ] TASK-007: Implement `habitSettingsStore` — CRUD for `HabitDefinition[]` against `data.json`, including archive and delete. (REQ-H014–H016, design §Data Model)
@@ -38,9 +38,12 @@ Each task references the REQ ID(s) and design section it fulfills. Ordered botto
 
 ## Verification
 - [ ] TASK-023: Manual UI test checklist pass, on both Obsidian desktop and mobile. (design §Test Strategy)
-- [ ] TASK-024: `tsc -noEmit -skipLibCheck` and the esbuild config both run clean. (PROJECT_PRINCIPLES.md Testing Standards)
+- [ ] TASK-024: `tsc -noEmit -skipLibCheck` and the esbuild config both run clean. (PROJECT_PRINCIPLES.md Testing Standards) — domain layer alone verified clean under `tsc --strict`; full-project check pending TASK-007+ since `obsidian`/`react`/`recharts` aren't installed in the environment these tasks were implemented in (see Notes).
 
 ## Notes
 
-- **External dependency:** REQ-C017 ("week starts on") is a cross-cutting product-level setting, not owned by this module — its storage and settings-UI belong to a not-yet-designed "cross-cutting shell" (Today view, navigation, global settings). TASK-003 and TASK-018/020's weekday pickers take `weekStartsOn` as a parameter per the design, but until the shell exists, wire it to a local constant defaulting to Monday rather than blocking on that module. Revisit this wiring once the cross-cutting shell is designed, so the value comes from the real global setting instead of the placeholder constant.
+- **Environment constraint:** TASK-001–006 were implemented and verified in a sandbox with no package-registry access, so only the domain layer (zero external dependencies by design) could be fully installed, compiled, and tested here. Project scaffolding (`package.json`, `tsconfig.json`, `esbuild.config.mjs`, `manifest.json`, `eslint.config.mjs`, a minimal `main.ts` stub) was written to spec but not build-verified end-to-end. Run `npm install` in a real environment and re-run `npm run build` / `npm test` before trusting TASK-024 fully.
+- Tests use Node's built-in test runner (`node:test` + `node:assert/strict`, run via `tsx`) rather than Jest/Vitest — zero added dependency, and sufficient for this project's scale. Not explicitly decided in design.md; flagging the choice here since it's a real (if small) technical decision.
+- **External dependency:** REQ-C017 ("week starts on") is a cross-cutting product-level setting, not owned by this module — its storage and settings-UI belong to a not-yet-designed "cross-cutting shell" (Today view, navigation, global settings). TASK-003's `isScheduledOn` and `weekBoundsFor` take `weekStartsOn`/rely on fixed weekday indices as designed, but nothing yet supplies the *real* global setting value — TASK-018/020's weekday pickers will need to source it from that shell once built, rather than a hardcoded default. Revisit this wiring once the cross-cutting shell is designed.
 - The log-folder-path setting flagged in design.md (no REQ ID) is included in TASK-008 as part of `habitLogFile`'s configuration surface.
+- **Implementation-level decision not spelled out in design.md:** `weeklyQuota` habits have no single "required" day, so `classifyDay` returns only `done`/`not-scheduled` at the day level (never `missed`) for that mode — whether a *week* met its quota is evaluated separately, at week granularity, inside `streakCalculator`. An in-progress (not yet fully elapsed) week is never counted as missed, so checking mid-week doesn't prematurely reset the streak. Flagging since this is more granular than design.md specified — worth a sanity check.
