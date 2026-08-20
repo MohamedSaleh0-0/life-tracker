@@ -3,20 +3,13 @@
 // §Architecture Overview (domain layer) and §Error Handling Strategy.
 
 import { HabitDefinition, WeekStartsOn, DayStatus } from './types';
+import { toLocalDateString, parseLocalDate } from '../../../core/date';
 
-/** Formats a Date as a local YYYY-MM-DD string (never UTC, per REQ-C012). */
-export function toLocalDateString(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** Parses a YYYY-MM-DD string into a local Date at midnight. */
-export function parseLocalDate(dateStr: string): Date {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
+// Re-exported so existing imports of these two helpers from this file
+// keep working — the actual implementation now lives in src/core/date.ts
+// as the one shared date function set (REQ-C012), since Data Point
+// Tracking and Money Management will need the same functions.
+export { toLocalDateString, parseLocalDate };
 
 /**
  * Internal weekday index for a date, fixed Monday=0..Sunday=6.

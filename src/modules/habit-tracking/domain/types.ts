@@ -46,3 +46,17 @@ export interface HabitStats {
   longestStreak: number;
   completionRate: number; // 0-1, over the requested range
 }
+
+// Full result of a habit-history query: the streak/rate numbers plus a
+// day-by-day classification of the requested range, for the heatmap
+// (design-habit-tracking.md §Interfaces & APIs).
+export interface HabitHistoryResult extends HabitStats {
+  days: DayClassification[];
+}
+
+// The value a single day's check-in can hold. Boolean habits log `true`;
+// numeric habits log the raw number. Lives in domain/ rather than
+// infrastructure/ since it's a value-shape concept, not a file-I/O one —
+// the application layer shouldn't have to reach into infrastructure
+// just to reference this type.
+export type HabitLogValue = boolean | number;

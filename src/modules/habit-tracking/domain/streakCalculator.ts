@@ -3,7 +3,8 @@
 // REQ-H009-H011.
 
 import { HabitDefinition, WeekStartsOn, HabitStats } from './types';
-import { classifyDay, weekBoundsFor, parseLocalDate, toLocalDateString } from './scheduleEvaluator';
+import { classifyDay, weekBoundsFor } from './scheduleEvaluator';
+import { addDaysLocal } from '../../../core/date';
 
 /** Callback-shaped lookup so streakCalculator stays decoupled from
  *  whatever data structure the infrastructure layer reads log files into. */
@@ -17,11 +18,7 @@ interface Period {
   result: PeriodResult;
 }
 
-function addDays(dateStr: string, n: number): string {
-  const d = parseLocalDate(dateStr);
-  d.setDate(d.getDate() + n);
-  return toLocalDateString(d);
-}
+const addDays = addDaysLocal;
 
 /**
  * Builds one Period per calendar day for daily/weekdays-mode habits.
