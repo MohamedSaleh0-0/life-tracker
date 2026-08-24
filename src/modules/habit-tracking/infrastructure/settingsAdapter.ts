@@ -1,8 +1,3 @@
-// Minimal port for reading/writing the plugin's settings blob
-// (Obsidian's Plugin.loadData()/saveData()), analogous to VaultAdapter —
-// same rationale: testable without the real `obsidian` package.
-
-export interface SettingsAdapter {
-  load(): Promise<Record<string, unknown> | null>;
-  save(data: Record<string, unknown>): Promise<void>;
-}
+// Re-exported from src/core/ports/settingsAdapter.ts — see vaultAdapter.ts
+// in this folder for why.
+export type { SettingsAdapter } from '../../../core/ports/settingsAdapter';

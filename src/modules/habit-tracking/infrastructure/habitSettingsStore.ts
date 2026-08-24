@@ -1,12 +1,8 @@
-// CRUD for HabitDefinition[] against the plugin's settings blob
-// (REQ-C008). See design-habit-tracking.md §Data Model (Settings store).
+// CRUD for HabitDefinition[] against the plugin's settings blob.
 
 import { HabitDefinition } from '../domain/types';
 import { SettingsAdapter } from './settingsAdapter';
 
-// The settings blob is shared across the whole plugin — other modules
-// will add their own top-level keys (dataPoints, accounts, etc.) here
-// later. This store only ever touches the `habits` key.
 interface LifeTrackerData {
   habits?: HabitDefinition[];
   [key: string]: unknown;
@@ -38,12 +34,11 @@ export class HabitSettingsStore {
     return habit;
   }
 
-  /** Also used for archive (REQ-H016), which is just `update(id, { archived: true })`. */
   async update(id: string, patch: Partial<HabitDefinition>): Promise<HabitDefinition> {
     const habits = await this.getAll();
     const idx = habits.findIndex((h) => h.id === id);
     if (idx === -1) throw new Error(`Habit not found: ${id}`);
-    const updated: HabitDefinition = { ...habits[idx], ...patch, id: habits[idx].id }; // id is immutable
+    const updated: HabitDefinition = { ...habits[idx], ...patch, id: habits[idx].id };
     habits[idx] = updated;
     await this.saveAll(habits);
     return updated;

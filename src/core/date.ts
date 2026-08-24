@@ -33,3 +33,18 @@ export function addDaysLocal(dateStr: string, n: number): string {
   d.setDate(d.getDate() + n);
   return toLocalDateString(d);
 }
+
+/**
+ * Adds `n` months to a YYYY-MM-DD local date string, optionally pinning
+ * the result to a specific day-of-month (used by Money Management's
+ * recurring entries, REQ-M018's monthly/yearly frequency + day-of-month).
+ * Relies on JS Date's own month-overflow rollover (e.g. month 13 becomes
+ * January of the next year), so this also correctly implements "yearly"
+ * as addMonthsLocal(date, 12, dayOfMonth).
+ */
+export function addMonthsLocal(dateStr: string, n: number, dayOfMonth?: number): string {
+  const d = parseLocalDate(dateStr);
+  const targetDay = dayOfMonth ?? d.getDate();
+  const result = new Date(d.getFullYear(), d.getMonth() + n, targetDay);
+  return toLocalDateString(result);
+}

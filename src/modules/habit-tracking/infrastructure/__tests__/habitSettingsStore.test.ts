@@ -39,9 +39,9 @@ describe('HabitSettingsStore CRUD', () => {
     await store.create(makeHabit());
 
     const updated = await store.update('h1', { name: 'Drink more water', id: 'should-be-ignored' as any });
-    assert.equal(updated.id, 'h1'); // id is immutable, patch attempt ignored
+    assert.equal(updated.id, 'h1');
     assert.equal(updated.name, 'Drink more water');
-    assert.equal(updated.color, '#3b82f6'); // untouched fields preserved
+    assert.equal(updated.color, '#3b82f6');
   });
 
   test('archive is just update({ archived: true })', async () => {

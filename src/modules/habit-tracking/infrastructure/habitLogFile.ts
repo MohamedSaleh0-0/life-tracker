@@ -1,7 +1,4 @@
-// Reads/writes the yearly markdown log files (REQ-C009/C010). Depends
-// only on VaultAdapter, not the real Obsidian API, so it's fully unit
-// testable in any environment. See design-habit-tracking.md §Data Model
-// (Markdown log file) and §Error Handling Strategy.
+// Reads/writes the yearly markdown log files (REQ-C009/C010).
 
 import { VaultAdapter } from './vaultAdapter';
 import { HabitLogValue } from '../domain/types';
@@ -9,21 +6,18 @@ import { HabitLogValue } from '../domain/types';
 const DEFAULT_LOG_FOLDER = 'Life Tracker/Logs/Habits';
 
 export interface HabitLogFileConfig {
-  logFolder?: string; // configurable per design.md's flagged setting
+  logFolder?: string;
 }
 
-// Re-exported for convenience so existing imports of HabitLogValue from
-// this file keep working — the type itself now lives in domain/types.ts.
 export type { HabitLogValue };
 
-// Matches lines like: - 2026-08-19 [habit-a1b2c3:: true] [habit-d4e5f6:: 8000]
 const LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+(.*)$/;
 const FIELD_RE = /\[habit-([a-zA-Z0-9_-]+)::\s*([^\]]+)\]/g;
 
 function parseFieldValue(raw: string): HabitLogValue {
   const trimmed = raw.trim();
   if (trimmed === 'true') return true;
-  if (trimmed === 'false') return false; // not written by this module, but tolerated on hand-edit
+  if (trimmed === 'false') return false;
   const num = Number(trimmed);
   if (!Number.isNaN(num) && trimmed !== '') return num;
   throw new Error(`Unrecognized habit log value: "${raw}"`);
@@ -37,14 +31,6 @@ function yearOf(date: string): string {
   return date.slice(0, 4);
 }
 
-/**
- * Thrown when a year file exists but fails to read/parse. Callers
- * (the application layer) are expected to surface this as a
- * non-blocking error banner rather than crashing the dashboard load —
- * per the product-vision Edge Case: "fail safely... shall not overwrite
- * the existing file until the user takes explicit action." This module
- * never calls writeFile for a year whose read just failed.
- */
 export class HabitLogFileReadError extends Error {
   constructor(
     public readonly path: string,
@@ -106,7 +92,7 @@ export class HabitLogFile {
     const lines: string[] = [];
     for (const date of sortedDates) {
       const fields = days.get(date)!;
-      if (fields.size === 0) continue; // no line for an empty day — keeps the file clean
+      if (fields.size === 0) continue;
       const fieldStrs = Array.from(fields.entries())
         .map(([id, value]) => `[habit-${id}:: ${serializeFieldValue(value)}]`)
         .join(' ');
@@ -125,16 +111,11 @@ export class HabitLogFile {
     await this.adapter.writeFile(this.pathForYear(year), this.serializeYearFile(days));
   }
 
-  /** Reads all habit values logged on a single day. */
   async readDay(date: string): Promise<Map<string, HabitLogValue>> {
     const days = await this.readYearFile(yearOf(date));
     return days.get(date) ?? new Map();
   }
 
-  /**
-   * Reads all logged days in [startDate, endDate] inclusive, across
-   * however many year files that range spans.
-   */
   async readRange(
     startDate: string,
     endDate: string
@@ -154,11 +135,6 @@ export class HabitLogFile {
     return result;
   }
 
-  /**
-   * Writes (or overwrites) a single habit's field on a single day,
-   * leaving every other habit's field on that day's line untouched
-   * (REQ-H008: editing today's value rewrites only that field).
-   */
   async writeField(date: string, habitId: string, value: HabitLogValue): Promise<void> {
     const year = yearOf(date);
     const days = await this.readYearFile(year);
@@ -168,13 +144,6 @@ export class HabitLogFile {
     await this.writeYearFile(year, days);
   }
 
-  /**
-   * Checks whether any log entry exists anywhere for a given habit id
-   * (used to decide whether delete, REQ-H015, needs confirmation).
-   * Scans every year file under the log folder; acceptable given yearly
-   * splitting keeps individual files small, but flagged as a possible
-   * optimization target if history grows very large.
-   */
   async hasAnyLogEntry(habitId: string): Promise<boolean> {
     const files = await this.adapter.listFilesUnder(this.logFolder);
     for (const file of files) {

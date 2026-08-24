@@ -1,6 +1,5 @@
 import { VaultAdapter, VaultFileRef } from '../vaultAdapter';
 
-/** Pure in-memory VaultAdapter for tests — no Obsidian dependency. */
 export class FakeVaultAdapter implements VaultAdapter {
   private files = new Map<string, string>();
   private folders = new Set<string>();

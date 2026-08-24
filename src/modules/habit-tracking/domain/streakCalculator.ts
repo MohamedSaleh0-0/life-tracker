@@ -1,30 +1,21 @@
 // Pure domain logic: streak and completion-rate math. No I/O.
-// See design-habit-tracking.md §Architecture Overview (domain layer),
-// REQ-H009-H011.
 
 import { HabitDefinition, WeekStartsOn, HabitStats } from './types';
 import { classifyDay, weekBoundsFor } from './scheduleEvaluator';
 import { addDaysLocal } from '../../../core/date';
 
-/** Callback-shaped lookup so streakCalculator stays decoupled from
- *  whatever data structure the infrastructure layer reads log files into. */
 export interface LoggedDaysLookup {
   isLoggedOn(date: string): boolean;
 }
 
 type PeriodResult = 'met' | 'not-met' | 'not-scheduled';
 interface Period {
-  date: string; // for daily/weekdays: the day itself; for weeklyQuota: the week's start date
+  date: string;
   result: PeriodResult;
 }
 
 const addDays = addDaysLocal;
 
-/**
- * Builds one Period per calendar day for daily/weekdays-mode habits.
- * A 'not-scheduled' day never breaks a streak (REQ-H009) and never
- * enters the completion-rate denominator.
- */
 function buildDailyPeriods(
   habit: HabitDefinition,
   log: LoggedDaysLookup,
@@ -43,13 +34,6 @@ function buildDailyPeriods(
   return periods;
 }
 
-/**
- * Builds one Period per calendar week for weeklyQuota-mode habits.
- * A week only counts as 'not-met' once it has fully elapsed relative to
- * `toDate` — an in-progress week is never prematurely treated as missed,
- * so checking your streak mid-week doesn't reset it just because you
- * haven't hit quota yet with days still remaining.
- */
 function buildWeeklyQuotaPeriods(
   habit: HabitDefinition,
   log: LoggedDaysLookup,
@@ -90,8 +74,6 @@ function buildWeeklyQuotaPeriods(
         } else if (weekFullyElapsed) {
           result = 'not-met';
         } else {
-          // Quota not yet reached, but the week isn't over — don't
-          // count it either way yet.
           result = 'not-scheduled';
         }
 
@@ -114,7 +96,7 @@ function currentStreakFromPeriods(periods: Period[]): number {
       streak++;
       continue;
     }
-    break; // first 'not-met' walking backward ends the current streak
+    break;
   }
   return streak;
 }
@@ -141,11 +123,6 @@ function completionRateFromPeriods(periods: Period[]): number {
   return met / scheduled.length;
 }
 
-/**
- * Computes current streak, longest streak (both over the habit's full
- * history, per REQ-H009/H010), and completion rate over `rangeStart..today`
- * (per REQ-H011, a selectable range).
- */
 export function calculateHabitStats(
   habit: HabitDefinition,
   log: LoggedDaysLookup,

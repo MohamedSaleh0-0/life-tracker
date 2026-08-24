@@ -1,6 +1,6 @@
 // Streak numbers, calendar heatmap, and the per-habit trend-visibility
 // toggle. See design-habit-tracking.md §Key Flows (Streaks & Heatmap),
-// REQ-H009-H013, REQ-H015-H016.
+// REQ-H009-H013, REQ-H014-H016.
 
 import React, { useEffect, useState } from 'react';
 import { App } from 'obsidian';
@@ -9,9 +9,10 @@ import { HabitService, DeleteRequiresConfirmationError } from '../application/ha
 import { HabitDefinition, HabitHistoryResult, WeekStartsOn } from '../domain/types';
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
 import { HabitDeleteConfirmModal } from './HabitDeleteConfirmModal';
+import { HabitWizardModal } from './HabitWizardModal';
 
 export interface HabitDetailViewProps {
-  app: App; // needed to open HabitDeleteConfirmModal
+  app: App; // needed to open HabitDeleteConfirmModal / HabitWizardModal
   habit: HabitDefinition;
   habitService: HabitService;
   /**
@@ -21,6 +22,10 @@ export interface HabitDetailViewProps {
    */
   weekStartsOn: WeekStartsOn;
   onToggleTrendVisible: (visible: boolean) => void;
+  /** Plain "go back to the list" with no side effect — the missing piece before this fix: previously the only way out of detail view was edit/archive/delete. */
+  onBack: () => void;
+  /** Called after a successful edit via the wizard (REQ-H014). */
+  onEdited: () => void;
   /** Called after either an immediate delete or a confirmed delete completes. */
   onDeleted: () => void;
   /** Called after archiving; the caller typically navigates away, same as onDeleted. */
@@ -39,6 +44,8 @@ export function HabitDetailView({
   habitService,
   weekStartsOn,
   onToggleTrendVisible,
+  onBack,
+  onEdited,
   onDeleted,
   onArchived,
 }: HabitDetailViewProps) {
@@ -60,6 +67,10 @@ export function HabitDetailView({
     date: d.date,
     status: d.status,
   }));
+
+  const handleEditClick = () => {
+    new HabitWizardModal(app, habitService, weekStartsOn, habit, onEdited).open();
+  };
 
   const handleDeleteClick = async () => {
     try {
@@ -85,6 +96,9 @@ export function HabitDetailView({
 
   return (
     <div className="ltk-habit-detail">
+      <button type="button" className="ltk-back-button" onClick={onBack}>
+        ← Back
+      </button>
       <header className="ltk-habit-detail__header">
         <span className="ltk-habit-detail__icon">{habit.icon}</span>
         <h2>{habit.name}</h2>
@@ -121,6 +135,9 @@ export function HabitDetailView({
       )}
 
       <div className="ltk-habit-detail__lifecycle-actions">
+        <button type="button" onClick={handleEditClick}>
+          Edit
+        </button>
         <button type="button" onClick={handleArchiveClick}>
           Archive
         </button>

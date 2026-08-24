@@ -1,0 +1,1065 @@
+/* Life Tracker — plugin stylesheet.
+   Uses Obsidian's own CSS variables throughout so light/dark theme
+   parity is automatic (PROJECT_PRINCIPLES.md: respect the user's theme
+   via Obsidian's CSS vars, don't hardcode a look). Nothing here was
+   present before this pass — the plugin previously shipped with zero
+   CSS, which is why every custom `ltk-*` class rendered as unstyled
+   default HTML. */
+
+/* ---------- Shared primitives ---------- */
+
+.ltk-step-wizard,
+.ltk-habit-view,
+.ltk-habit-detail {
+  font-family: var(--font-interface);
+  color: var(--text-normal);
+}
+
+.ltk-button,
+.ltk-step-wizard__actions button,
+.ltk-habit-row button,
+.ltk-numeric-quick-entry button,
+.ltk-habit-detail__lifecycle-actions button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+  transition: background-color 0.1s ease, border-color 0.1s ease, transform 0.05s ease;
+}
+
+.ltk-button:hover,
+.ltk-step-wizard__actions button:not(:disabled):hover,
+.ltk-habit-row button:hover,
+.ltk-numeric-quick-entry button:hover,
+.ltk-habit-detail__lifecycle-actions button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ltk-button:active,
+.ltk-step-wizard__actions button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.ltk-button--accent,
+.ltk-step-wizard__actions button:last-child:not(:disabled) {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ltk-button--accent:hover,
+.ltk-step-wizard__actions button:last-child:not(:disabled):hover {
+  background: var(--interactive-accent-hover);
+}
+
+.ltk-step-wizard__actions button:disabled,
+.ltk-habit-detail__lifecycle-actions button.mod-warning {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ltk-habit-detail__lifecycle-actions button.mod-warning {
+  border-color: var(--text-error);
+  color: var(--text-error);
+  opacity: 1;
+}
+.ltk-habit-detail__lifecycle-actions button.mod-warning:hover {
+  background: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+.ltk-wizard-step input[type='text'],
+.ltk-wizard-step input:not([type]),
+.ltk-wizard-step input[type='number'],
+.ltk-numeric-quick-entry input[type='number'] {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ltk-wizard-step input:focus,
+.ltk-numeric-quick-entry input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ltk-wizard-step input[type='color'] {
+  width: 36px;
+  height: 28px;
+  padding: 2px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+}
+
+.ltk-wizard-step label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ltk-wizard-step label > input[type='text'],
+.ltk-wizard-step label > input:not([type]),
+.ltk-wizard-step label > input[type='number'] {
+  flex: 1;
+  color: var(--text-normal);
+}
+
+/* ---------- Step Wizard ---------- */
+
+.ltk-step-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 2px;
+}
+
+.ltk-step-wizard__indicator {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 10px;
+}
+
+.ltk-step-wizard__dot {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.ltk-step-wizard__dot.is-complete {
+  color: var(--text-muted);
+}
+
+.ltk-step-wizard__dot.is-current {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+}
+
+.ltk-step-wizard__body {
+  min-height: 160px;
+}
+
+.ltk-step-wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 12px;
+}
+
+.ltk-wizard-step--review p {
+  margin: 4px 0;
+  font-size: var(--font-ui-medium);
+}
+
+.ltk-wizard-step__target {
+  margin-left: 24px;
+  padding-left: 10px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+/* ---------- Weekday picker ---------- */
+
+.ltk-weekday-picker {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 12px 24px;
+}
+
+.ltk-weekday-picker button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  width: 40px;
+  height: 32px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+
+.ltk-weekday-picker button:hover {
+  border-color: var(--interactive-accent);
+}
+
+.ltk-weekday-picker button.is-selected {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* ---------- Error boundary ---------- */
+
+.ltk-error-boundary {
+  padding: 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--text-error);
+  background: var(--background-secondary);
+  color: var(--text-error);
+}
+
+.ltk-error-boundary pre {
+  white-space: pre-wrap;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+/* ---------- Habit tracker view (dashboard) ---------- */
+
+.ltk-habit-view {
+  padding: 12px;
+}
+
+.ltk-habit-view__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.ltk-habit-view__header h2 {
+  margin: 0;
+}
+
+.ltk-habit-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ltk-habit-dashboard h3 {
+  font-size: var(--font-ui-small);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  margin: 0 0 8px 0;
+}
+
+.ltk-empty {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  font-style: italic;
+}
+
+.ltk-habit-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.ltk-habit-row:hover {
+  border-color: var(--interactive-accent);
+}
+
+.ltk-habit-row--done {
+  opacity: 0.75;
+}
+
+.ltk-habit-row__icon {
+  font-size: 1.2em;
+}
+
+.ltk-habit-row__name {
+  flex: 1 1 auto;
+  min-width: 60px;
+  font-weight: 500;
+}
+
+.ltk-habit-row__value {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ltk-numeric-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ltk-numeric-stepper button {
+  font: inherit;
+  font-size: 1.1em;
+  font-weight: 700;
+  /* 32px meets a reasonable minimum touch target on mobile while
+     staying compact enough for a dense list on desktop. */
+  width: 32px;
+  height: 32px;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.ltk-numeric-stepper button:hover {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.ltk-numeric-stepper button:active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ltk-numeric-stepper__value {
+  width: 4em;
+  min-width: 3em;
+  text-align: center;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-normal);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  padding: 3px 2px;
+}
+
+.ltk-numeric-stepper__value:hover {
+  border-color: var(--background-modifier-border);
+}
+
+.ltk-numeric-stepper__value:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  background: var(--background-primary);
+}
+
+/* Hide the native up/down spinner — the +/- buttons already do that job, and the arrows shrink the tappable text area on mobile. */
+.ltk-numeric-stepper__value::-webkit-outer-spin-button,
+.ltk-numeric-stepper__value::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ltk-numeric-stepper__value[type='number'] {
+  -moz-appearance: textfield;
+}
+
+.ltk-numeric-stepper__unit {
+  font-weight: 400;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-left: -2px;
+}
+
+.ltk-back-button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 4px 0;
+  margin-bottom: 12px;
+  border: none;
+  background: transparent;
+  color: var(--interactive-accent);
+  cursor: pointer;
+}
+
+.ltk-back-button:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Habit detail view ---------- */
+
+.ltk-habit-detail {
+  padding: 12px;
+}
+
+.ltk-habit-detail__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ltk-habit-detail__icon {
+  font-size: 1.6em;
+}
+
+.ltk-habit-detail__header h2 {
+  margin: 0;
+}
+
+.ltk-habit-detail__stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ltk-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ltk-stat__value {
+  font-size: 1.6em;
+  font-weight: 700;
+  color: var(--interactive-accent);
+}
+
+.ltk-stat__label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 2px;
+}
+
+.ltk-habit-detail__trend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.ltk-habit-detail__lifecycle-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* ---------- Calendar heatmap ---------- */
+
+.ltk-calendar-heatmap {
+  display: block;
+  margin: 8px 0;
+}
+
+.ltk-calendar-heatmap rect {
+  transition: opacity 0.1s ease;
+}
+
+.ltk-calendar-heatmap rect:hover {
+  opacity: 0.7;
+}
+
+/* ---------- Data Point Tracking ---------- */
+
+.ltk-template-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ltk-template-row button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.ltk-template-row button:hover {
+  border-color: var(--interactive-accent);
+}
+
+.ltk-entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ltk-entry-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.ltk-entry-form input,
+.ltk-entry-form textarea,
+.ltk-entry-form select {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ltk-entry-form select {
+  cursor: pointer;
+}
+
+.ltk-entry-form textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
+.ltk-entry-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.ltk-entry-form__actions button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.ltk-entry-form__actions button.ltk-button--accent {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ltk-form-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+  margin: 0 0 8px 0;
+}
+
+.ltk-datapoint-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ltk-datapoint-card {
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  overflow: hidden;
+}
+
+.ltk-datapoint-card__header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.ltk-datapoint-card__header:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ltk-datapoint-card__name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.ltk-datapoint-card__count {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.ltk-datapoint-card__header button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--interactive-accent);
+  background: transparent;
+  color: var(--interactive-accent);
+  cursor: pointer;
+}
+
+.ltk-datapoint-card__header button:hover {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ltk-datapoint-card__entries {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 10px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ltk-datapoint-card__entries li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: var(--font-ui-small);
+}
+
+.ltk-datapoint-card__entries li:not(:last-child) {
+  border-bottom: 1px solid var(--background-modifier-border-hover, var(--background-modifier-border));
+}
+
+.ltk-datapoint-entry__time {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+}
+
+.ltk-datapoint-entry__value {
+  flex: 1;
+  font-weight: 500;
+}
+
+.ltk-datapoint-card__entries button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  padding: 2px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ltk-datapoint-card__entries button:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.ltk-datapoint-detail {
+  padding: 12px;
+}
+
+.ltk-datapoint-detail__header h2 {
+  margin: 0 0 12px 0;
+}
+
+.ltk-datapoint-detail__chart {
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  padding: 8px;
+  margin-bottom: 16px;
+}
+
+.ltk-chart-tooltip {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 6px 10px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
+}
+
+.ltk-datapoint-detail__text-list {
+  list-style: none;
+  margin: 0 0 16px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ltk-datapoint-detail__text-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.ltk-datapoint-detail__text-list .ltk-datapoint-entry__time {
+  font-size: var(--font-ui-smaller);
+}
+
+/* ---------- Money Management ---------- */
+
+.ltk-money-networth {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  margin-bottom: 12px;
+}
+
+.ltk-money-networth__label {
+  font-size: var(--font-ui-small);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ltk-money-networth__value {
+  font-size: 1.4em;
+  font-weight: 700;
+  color: var(--interactive-accent);
+}
+
+.ltk-money-networth__flag {
+  width: 100%;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-error);
+}
+
+.ltk-money-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.ltk-money-account-card {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.ltk-money-account-card__name {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ltk-money-account-card__balance {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ltk-money-transactions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ltk-money-transactions li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.ltk-money-tx__date {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 78px;
+}
+
+.ltk-money-tx__desc {
+  flex: 1 1 auto;
+  min-width: 80px;
+}
+
+.ltk-money-tx__category {
+  color: var(--text-faint);
+}
+
+.ltk-money-tx__amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ltk-money-tx__amount--neg {
+  color: var(--text-error);
+}
+
+.ltk-money-tx__amount--pos {
+  color: var(--color-green, #22c55e);
+}
+
+.ltk-money-transactions button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  padding: 2px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ltk-money-transactions button:hover {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+/* ---------- Unified settings tab ---------- */
+
+.ltk-settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.ltk-settings-nav__button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ltk-settings-nav__button:hover {
+  border-color: var(--interactive-accent);
+}
+
+.ltk-settings-nav__button.is-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ltk-settings-body h3 {
+  margin-top: 24px;
+}
+
+.ltk-settings-body h3:first-child {
+  margin-top: 0;
+}
+
+/* ---------- Entry-form layout helpers (transaction / recurring / shopping forms) ---------- */
+
+.ltk-entry-form__row {
+  display: flex;
+  gap: 10px;
+}
+
+.ltk-entry-form__row label {
+  flex: 1;
+}
+
+.ltk-entry-form__checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.ltk-entry-form__checkbox input[type='checkbox'] {
+  width: auto;
+}
+
+/* ---------- Recurring entries "needs attention" ---------- */
+
+.ltk-money-due {
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--text-warning, #eab308);
+  background: var(--background-secondary);
+  margin-bottom: 16px;
+}
+
+.ltk-money-due h3 {
+  margin: 0 0 8px 0 !important;
+  font-size: var(--font-ui-small);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-warning, #eab308);
+}
+
+.ltk-money-due__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: var(--font-ui-small);
+}
+
+.ltk-money-due__name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.ltk-money-due__amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.ltk-money-due__row button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  padding: 3px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+/* ---------- Shopping lists ---------- */
+
+.ltk-money-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 8px 0;
+}
+
+.ltk-money-section-header h3 {
+  margin: 0;
+}
+
+.ltk-money-section-header button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  padding: 4px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--interactive-accent);
+  background: transparent;
+  color: var(--interactive-accent);
+  cursor: pointer;
+}
+
+.ltk-shopping-lists {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ltk-shopping-list-card {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.ltk-shopping-list-card:hover {
+  border-color: var(--interactive-accent);
+}
+
+.ltk-shopping-list-card__name {
+  font-weight: 500;
+}
+
+.ltk-shopping-list-card__summary {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.ltk-shopping-detail__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ltk-shopping-items {
+  list-style: none;
+  margin: 0 0 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ltk-shopping-items li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.ltk-shopping-items--history li {
+  opacity: 0.7;
+}
+
+.ltk-shopping-item__name {
+  flex: 1 1 auto;
+  min-width: 60px;
+  font-weight: 500;
+}
+
+.ltk-shopping-item__qty,
+.ltk-shopping-item__price,
+.ltk-shopping-item__due {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.ltk-shopping-items button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  padding: 3px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+}

@@ -1,40 +1,16 @@
 // Pure domain logic: is a habit scheduled on a given day, and what does
-// that day's status classify as. No I/O. See design-habit-tracking.md
-// §Architecture Overview (domain layer) and §Error Handling Strategy.
+// that day's status classify as. No I/O.
 
 import { HabitDefinition, WeekStartsOn, DayStatus } from './types';
 import { toLocalDateString, parseLocalDate } from '../../../core/date';
 
-// Re-exported so existing imports of these two helpers from this file
-// keep working — the actual implementation now lives in src/core/date.ts
-// as the one shared date function set (REQ-C012), since Data Point
-// Tracking and Money Management will need the same functions.
 export { toLocalDateString, parseLocalDate };
 
-/**
- * Internal weekday index for a date, fixed Monday=0..Sunday=6.
- * This is independent of the user's "week starts on" setting — that
- * setting never affects how weekday indices are computed or stored,
- * only display order and week-boundary placement (see weekBoundsFor).
- */
 function internalWeekdayIndex(date: Date): number {
-  const jsDay = date.getDay(); // 0=Sunday..6=Saturday
-  return (jsDay + 6) % 7; // 0=Monday..6=Sunday
+  const jsDay = date.getDay();
+  return (jsDay + 6) % 7;
 }
 
-/**
- * Returns true if `habit` is scheduled to be actioned on `date`.
- *
- * - daily: every day from habit.createdAt onward.
- * - weekdays: only the configured weekday indices, from createdAt onward.
- * - weeklyQuota: every day is eligible (no single day is individually
- *   "required" — the quota constraint is evaluated per week by
- *   streakCalculator, not per day here).
- *
- * A date before habit.createdAt is never scheduled, regardless of mode
- * (habit doc Edge Case: "a habit created mid-week or mid-month — days
- * before its creation date are not counted as missed").
- */
 export function isScheduledOn(habit: HabitDefinition, date: string): boolean {
   if (date < habit.createdAt) return false;
 
@@ -50,14 +26,6 @@ export function isScheduledOn(habit: HabitDefinition, date: string): boolean {
   }
 }
 
-/**
- * Classifies a single day for heatmap/history display (REQ-H012).
- *
- * For weeklyQuota habits, no single day is individually required, so a
- * day's status is only ever 'done' or 'not-scheduled' at the day level —
- * whether a *week* met its quota is a week-level concept handled by
- * streakCalculator, not represented in this per-day classification.
- */
 export function classifyDay(
   habit: HabitDefinition,
   date: string,
@@ -73,17 +41,36 @@ export function classifyDay(
 }
 
 /**
+ * Maps a "week starts on" setting to its fixed internal weekday index
+ * (Monday=0..Sunday=6). Exported so the UI's weekday-picker display
+ * order can reuse the same lookup rather than duplicating the mapping.
+ */
+export function weekStartInternalIndex(weekStartsOn: WeekStartsOn): number {
+  switch (weekStartsOn) {
+    case 'monday':
+      return 0;
+    case 'saturday':
+      return 5;
+    case 'sunday':
+      return 6;
+  }
+}
+
+/**
  * Returns the [startDate, endDate] (inclusive, YYYY-MM-DD) of the week
- * containing `date`, per the weekStartsOn setting (REQ-C017).
+ * containing `date`, per the weekStartsOn setting (REQ-C017). Generic
+ * over any start day via weekStartInternalIndex — adding Saturday as a
+ * third option required no change here beyond that lookup.
  */
 export function weekBoundsFor(
   date: string,
   weekStartsOn: WeekStartsOn
 ): [string, string] {
   const dt = parseLocalDate(date);
-  const idx = internalWeekdayIndex(dt); // 0=Mon..6=Sun
+  const idx = internalWeekdayIndex(dt);
+  const startIdx = weekStartInternalIndex(weekStartsOn);
 
-  const offsetToStart = weekStartsOn === 'monday' ? idx : (idx + 1) % 7;
+  const offsetToStart = (idx - startIdx + 7) % 7;
   const start = new Date(dt);
   start.setDate(dt.getDate() - offsetToStart);
   const end = new Date(start);

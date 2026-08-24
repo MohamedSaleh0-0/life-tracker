@@ -93,7 +93,7 @@ describe('HabitService daily check-in flow', () => {
     });
 
     await service.editTodayLog(habit.id, 3000);
-    await service.editTodayLog(habit.id, 8500); // edit
+    await service.editTodayLog(habit.id, 8500);
 
     const completed = await service.getCompletedForToday();
     assert.equal(completed.length, 1);
@@ -111,9 +111,9 @@ describe('HabitService daily check-in flow', () => {
       target: { value: 8000, unit: 'steps' },
     });
 
-    await service.editTodayLog(habit.id, 1000); // well below target
+    await service.editTodayLog(habit.id, 1000);
     const completed = await service.getCompletedForToday();
-    assert.equal(completed.length, 1); // still counts as done, no gate
+    assert.equal(completed.length, 1);
   });
 
   test('an archived habit never appears in pending or completed', async () => {
@@ -142,7 +142,7 @@ describe('HabitService.deleteHabit', () => {
       color: '#000',
       schedule: { mode: 'daily' },
     });
-    await service.deleteHabit(habit.id); // no confirmed flag needed
+    await service.deleteHabit(habit.id);
     assert.equal(await settingsStore.get(habit.id), undefined);
   });
 
@@ -181,10 +181,6 @@ describe('HabitService.deleteHabit', () => {
 
 describe('HabitService.getHabitHistory', () => {
   test('reflects streak/completion-rate math from the domain layer end-to-end', async () => {
-    // Create the habit "in the past" (createdAt = 08-17), then query
-    // history "today" (08-19) via a second service instance sharing the
-    // same underlying stores — a single fixed clock can't represent
-    // both moments, since createHabit always stamps createdAt = today().
     const { service: pastService, settingsStore, logFile } = makeService('2026-08-17');
     const habit = await pastService.createHabit({
       type: 'boolean',
@@ -232,7 +228,6 @@ describe('HabitService.getHabitHistory', () => {
       clock: () => new Date('2026-08-17T12:00:00'),
     });
     await todayService.logHabit(habit.id, '2026-08-15', true);
-    // 08-16 left unlogged (missed), 08-17 logged.
     await todayService.logHabit(habit.id, '2026-08-17', true);
 
     const result = await todayService.getHabitHistory(habit.id, '2026-08-15', 'monday');

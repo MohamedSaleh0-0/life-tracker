@@ -3,13 +3,27 @@
 // step-indicator pattern as the habit creation wizard") reuses this
 // directly rather than duplicating the pattern.
 // See design-habit-tracking.md §Architecture Overview.
+//
+// Each step is a real React component (not a plain function called
+// inline during another component's render). Validity is reported via
+// useEffect from inside that step component. An earlier version had
+// each step call onValidChange() directly during StepWizard's own
+// render pass ("adjust state while rendering") — legal in principle,
+// but fragile in practice and the root cause of a silent blank-modal
+// bug. Components + useEffect is the boring, hard-to-get-wrong way to
+// do this, so that's what we use.
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { ErrorBoundary } from './ErrorBoundary';
+
+export interface WizardStepProps {
+  onValidChange: (valid: boolean) => void;
+}
 
 export interface WizardStep {
   id: string;
   title: string;
-  render: (props: { onValidChange: (valid: boolean) => void }) => React.ReactNode;
+  component: React.ComponentType<WizardStepProps>;
 }
 
 export interface StepWizardProps {
@@ -27,6 +41,14 @@ export function StepWizard({ steps, onComplete, onCancel, completeLabel = 'Creat
   const current = steps[currentIndex];
   const isLastStep = currentIndex === steps.length - 1;
   const canAdvance = validByStep[current.id] ?? false;
+  const currentStepId = current.id;
+
+  // Called from the step's useEffect (post-commit), never during
+  // render — no bailout gymnastics required, but we still avoid a
+  // needless re-render when the value hasn't actually changed.
+  const handleValidChange = useCallback((valid: boolean) => {
+    setValidByStep((prev) => (prev[currentStepId] === valid ? prev : { ...prev, [currentStepId]: valid }));
+  }, [currentStepId]);
 
   const handleNext = async () => {
     if (!canAdvance || submitting) return;
@@ -50,6 +72,8 @@ export function StepWizard({ steps, onComplete, onCancel, completeLabel = 'Creat
     }
   };
 
+  const CurrentStepComponent = current.component;
+
   return (
     <div className="ltk-step-wizard">
       <div className="ltk-step-wizard__indicator" role="tablist" aria-label="Wizard steps">
@@ -70,9 +94,9 @@ export function StepWizard({ steps, onComplete, onCancel, completeLabel = 'Creat
       </div>
 
       <div className="ltk-step-wizard__body">
-        {current.render({
-          onValidChange: (valid) => setValidByStep((prev) => ({ ...prev, [current.id]: valid })),
-        })}
+        <ErrorBoundary>
+          <CurrentStepComponent onValidChange={handleValidChange} />
+        </ErrorBoundary>
       </div>
 
       <div className="ltk-step-wizard__actions">

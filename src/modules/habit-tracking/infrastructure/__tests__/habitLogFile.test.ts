@@ -22,11 +22,11 @@ describe('HabitLogFile round-trip', () => {
 
     await log.writeField('2026-08-19', 'a1b2c3', true);
     await log.writeField('2026-08-19', 'd4e5f6', 8000);
-    await log.writeField('2026-08-19', 'd4e5f6', 9500); // edit
+    await log.writeField('2026-08-19', 'd4e5f6', 9500);
 
     const day = await log.readDay('2026-08-19');
-    assert.equal(day.get('a1b2c3'), true); // untouched
-    assert.equal(day.get('d4e5f6'), 9500); // updated
+    assert.equal(day.get('a1b2c3'), true);
+    assert.equal(day.get('d4e5f6'), 9500);
   });
 
   test('a day with no entries produces no line in the file (clean for hand-editing)', async () => {

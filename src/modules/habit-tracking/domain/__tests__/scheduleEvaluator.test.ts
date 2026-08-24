@@ -30,34 +30,30 @@ describe('isScheduledOn', () => {
     const habit = makeHabit({ schedule: { mode: 'daily' }, createdAt: '2026-01-01' });
     assert.equal(isScheduledOn(habit, '2026-01-01'), true);
     assert.equal(isScheduledOn(habit, '2026-06-15'), true);
-    assert.equal(isScheduledOn(habit, '2025-12-31'), false); // before createdAt
+    assert.equal(isScheduledOn(habit, '2025-12-31'), false);
   });
 
   test('weekdays mode: only scheduled on configured weekday indices', () => {
-    // 2026-08-17 is a Monday. days: [0,2,4] = Mon, Wed, Fri.
     const habit = makeHabit({
       schedule: { mode: 'weekdays', days: [0, 2, 4] },
       createdAt: '2026-01-01',
     });
-    assert.equal(isScheduledOn(habit, '2026-08-17'), true); // Monday
-    assert.equal(isScheduledOn(habit, '2026-08-18'), false); // Tuesday
-    assert.equal(isScheduledOn(habit, '2026-08-19'), true); // Wednesday
-    assert.equal(isScheduledOn(habit, '2026-08-21'), true); // Friday
-    assert.equal(isScheduledOn(habit, '2026-08-22'), false); // Saturday
-    assert.equal(isScheduledOn(habit, '2026-08-23'), false); // Sunday
+    assert.equal(isScheduledOn(habit, '2026-08-17'), true);
+    assert.equal(isScheduledOn(habit, '2026-08-18'), false);
+    assert.equal(isScheduledOn(habit, '2026-08-19'), true);
+    assert.equal(isScheduledOn(habit, '2026-08-21'), true);
+    assert.equal(isScheduledOn(habit, '2026-08-22'), false);
+    assert.equal(isScheduledOn(habit, '2026-08-23'), false);
   });
 
-  test('weekdays mode: weekday matching is invariant to weekStartsOn (not a parameter)', () => {
-    // Internal weekday indices are fixed regardless of the global
-    // "week starts on" display setting — isScheduledOn doesn't take
-    // weekStartsOn as a parameter at all, by design.
+  test('weekdays mode: weekday matching is invariant to weekStartsOn', () => {
     const habit = makeHabit({
-      schedule: { mode: 'weekdays', days: [5, 6] }, // Sat, Sun
+      schedule: { mode: 'weekdays', days: [5, 6] },
       createdAt: '2026-01-01',
     });
-    assert.equal(isScheduledOn(habit, '2026-08-22'), true); // Saturday
-    assert.equal(isScheduledOn(habit, '2026-08-23'), true); // Sunday
-    assert.equal(isScheduledOn(habit, '2026-08-24'), false); // Monday
+    assert.equal(isScheduledOn(habit, '2026-08-22'), true);
+    assert.equal(isScheduledOn(habit, '2026-08-23'), true);
+    assert.equal(isScheduledOn(habit, '2026-08-24'), false);
   });
 
   test('weeklyQuota mode: every day is eligible from createdAt onward', () => {
@@ -68,13 +64,13 @@ describe('isScheduledOn', () => {
     for (const d of ['2026-08-17', '2026-08-18', '2026-08-23']) {
       assert.equal(isScheduledOn(habit, d), true);
     }
-    assert.equal(isScheduledOn(habit, '2025-12-31'), false); // before createdAt
+    assert.equal(isScheduledOn(habit, '2025-12-31'), false);
   });
 
   test('mid-week/mid-month creation: pre-creation dates excluded for all modes', () => {
     const daily = makeHabit({ schedule: { mode: 'daily' }, createdAt: '2026-08-10' });
     const weekdays = makeHabit({
-      schedule: { mode: 'weekdays', days: [0, 1, 2, 3, 4, 5, 6] }, // every day
+      schedule: { mode: 'weekdays', days: [0, 1, 2, 3, 4, 5, 6] },
       createdAt: '2026-08-10',
     });
     const quota = makeHabit({
@@ -98,11 +94,11 @@ describe('classifyDay', () => {
 
   test('weekdays habit: a non-scheduled day is not-scheduled, never missed', () => {
     const habit = makeHabit({
-      schedule: { mode: 'weekdays', days: [0, 1, 2, 3, 4] }, // Mon-Fri
+      schedule: { mode: 'weekdays', days: [0, 1, 2, 3, 4] },
       createdAt: '2026-01-01',
     });
-    assert.equal(classifyDay(habit, '2026-08-22', false), 'not-scheduled'); // Saturday
-    assert.equal(classifyDay(habit, '2026-08-17', false), 'missed'); // Monday, not logged
+    assert.equal(classifyDay(habit, '2026-08-22', false), 'not-scheduled');
+    assert.equal(classifyDay(habit, '2026-08-17', false), 'missed');
     assert.equal(classifyDay(habit, '2026-08-17', true), 'done');
   });
 
@@ -130,15 +126,27 @@ describe('weekBoundsFor', () => {
   });
 
   test('monday-start: a Sunday belongs to the week that started the prior Monday', () => {
-    const [start, end] = weekBoundsFor('2026-08-23', 'monday'); // Sunday
+    const [start, end] = weekBoundsFor('2026-08-23', 'monday');
     assert.equal(start, '2026-08-17');
     assert.equal(end, '2026-08-23');
   });
 
   test('sunday-start: a Sunday is the start of its own week', () => {
-    const [start, end] = weekBoundsFor('2026-08-23', 'sunday'); // Sunday
+    const [start, end] = weekBoundsFor('2026-08-23', 'sunday');
     assert.equal(start, '2026-08-23');
     assert.equal(end, '2026-08-29');
+  });
+
+  test('saturday-start: 2026-08-19 (Wed) is in the Sat 08-15 .. Fri 08-21 week', () => {
+    const [start, end] = weekBoundsFor('2026-08-19', 'saturday');
+    assert.equal(start, '2026-08-15');
+    assert.equal(end, '2026-08-21');
+  });
+
+  test('saturday-start: a Saturday is the start of its own week', () => {
+    const [start, end] = weekBoundsFor('2026-08-15', 'saturday'); // Saturday
+    assert.equal(start, '2026-08-15');
+    assert.equal(end, '2026-08-21');
   });
 });
 

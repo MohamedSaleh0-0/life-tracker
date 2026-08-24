@@ -1,8 +1,5 @@
 // Delete confirmation, shown only when the habit has existing logged
-// history (REQ-H015). If there's no history, the caller should delete
-// directly without ever constructing this modal — see HabitService's
-// deleteHabit, which throws DeleteRequiresConfirmationError precisely
-// when confirmation is actually needed.
+// history (REQ-H015).
 
 import { App, Modal, Setting } from 'obsidian';
 import { HabitService } from '../application/habitService';
