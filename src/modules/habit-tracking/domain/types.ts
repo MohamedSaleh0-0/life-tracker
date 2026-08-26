@@ -35,6 +35,12 @@ export type DayStatus = 'done' | 'missed' | 'not-scheduled';
 export interface DayClassification {
   date: string;
   status: DayStatus;
+  /**
+   * The raw logged value for that day, when one exists (status === 'done').
+   * Added so numeric habits can render heatmap intensity / trend charts
+   * instead of a flat done/not-done color — a numeric log isn't just 1 or 0.
+   */
+  value?: HabitLogValue;
 }
 
 export interface HabitStats {

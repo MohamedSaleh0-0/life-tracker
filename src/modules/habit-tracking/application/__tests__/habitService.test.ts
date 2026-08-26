@@ -100,7 +100,7 @@ describe('HabitService daily check-in flow', () => {
     assert.equal(completed[0].value, 8500);
   });
 
-  test('logging a numeric value below target still counts as done (resolved Edge Case)', async () => {
+  test('logging a numeric value below target does NOT count as done (reversed Edge Case — target is now a completion gate, not just informational)', async () => {
     const { service } = makeService('2026-08-19');
     const habit = await service.createHabit({
       type: 'numeric',
@@ -112,8 +112,62 @@ describe('HabitService daily check-in flow', () => {
     });
 
     await service.editTodayLog(habit.id, 1000);
+
     const completed = await service.getCompletedForToday();
-    assert.equal(completed.length, 1);
+    assert.equal(completed.length, 0);
+
+    const pending = await service.getPendingForToday();
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].id, habit.id);
+  });
+
+  test('logging a numeric value that reaches target moves the habit to completed', async () => {
+    const { service } = makeService('2026-08-19');
+    const habit = await service.createHabit({
+      type: 'numeric',
+      name: 'Steps',
+      icon: '👟',
+      color: '#000',
+      schedule: { mode: 'daily' },
+      target: { value: 8000, unit: 'steps' },
+    });
+
+    await service.editTodayLog(habit.id, 7999);
+    assert.equal((await service.getCompletedForToday()).length, 0);
+
+    await service.editTodayLog(habit.id, 8000);
+    assert.equal((await service.getCompletedForToday()).length, 1);
+    assert.equal((await service.getPendingForToday()).length, 0);
+  });
+
+  test('a numeric habit with no target still completes on any logged value', async () => {
+    const { service } = makeService('2026-08-19');
+    const habit = await service.createHabit({
+      type: 'numeric',
+      name: 'Glasses of water',
+      icon: '🥤',
+      color: '#000',
+      schedule: { mode: 'daily' },
+    });
+
+    await service.editTodayLog(habit.id, 1);
+    assert.equal((await service.getCompletedForToday()).length, 1);
+  });
+
+  test('getTodayLog surfaces in-progress numeric values for a still-pending habit', async () => {
+    const { service } = makeService('2026-08-19');
+    const habit = await service.createHabit({
+      type: 'numeric',
+      name: 'Steps',
+      icon: '👟',
+      color: '#000',
+      schedule: { mode: 'daily' },
+      target: { value: 8000, unit: 'steps' },
+    });
+    await service.editTodayLog(habit.id, 3000);
+
+    const todayLog = await service.getTodayLog();
+    assert.equal(todayLog.get(habit.id), 3000);
   });
 
   test('an archived habit never appears in pending or completed', async () => {
@@ -235,5 +289,29 @@ describe('HabitService.getHabitHistory', () => {
     assert.equal(byDate.get('2026-08-15'), 'done');
     assert.equal(byDate.get('2026-08-16'), 'missed');
     assert.equal(byDate.get('2026-08-17'), 'done');
+  });
+
+  test('a numeric day below target classifies as missed (not done), even though a value was logged', async () => {
+    const { service: pastService, settingsStore, logFile } = makeService('2026-08-17');
+    const habit = await pastService.createHabit({
+      type: 'numeric',
+      name: 'Steps',
+      icon: '👟',
+      color: '#000',
+      schedule: { mode: 'daily' },
+      target: { value: 8000, unit: 'steps' },
+    });
+
+    const todayService = new HabitService({
+      settingsStore,
+      logFile,
+      idGenerator: () => 'unused',
+      clock: () => new Date('2026-08-17T12:00:00'),
+    });
+    await todayService.logHabit(habit.id, '2026-08-17', 500);
+
+    const result = await todayService.getHabitHistory(habit.id, '2026-08-17', 'monday');
+    assert.equal(result.days[0].status, 'missed');
+    assert.equal(result.days[0].value, 500); // the raw value is still carried, for the heatmap spectrum/trend chart
   });
 });

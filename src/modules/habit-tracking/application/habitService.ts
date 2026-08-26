@@ -4,6 +4,7 @@
 import { HabitDefinition, HabitSchedule, HabitTarget, WeekStartsOn, HabitHistoryResult, HabitLogValue, DayClassification } from '../domain/types';
 import { isScheduledOn, classifyDay } from '../domain/scheduleEvaluator';
 import { calculateHabitStats, LoggedDaysLookup } from '../domain/streakCalculator';
+import { meetsCompletion } from '../domain/completion';
 import { HabitSettingsStore } from '../infrastructure/habitSettingsStore';
 import { HabitLogFile } from '../infrastructure/habitLogFile';
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
@@ -95,12 +96,23 @@ export class HabitService {
     await this.logHabit(id, this.today(), value);
   }
 
+  /** Today's raw logged values, keyed by habit id — lets the dashboard show in-progress numeric values (e.g. "3/8 cups") for a habit that's logged but not yet at target, since REQ now gates "completed" on reaching target rather than on any log existing. */
+  async getTodayLog(): Promise<Map<string, HabitLogValue>> {
+    return this.logFile.readDay(this.today());
+  }
+
   async getPendingForToday(): Promise<HabitDefinition[]> {
     const today = this.today();
     const habits = await this.settingsStore.getAll();
     const todaysLog = await this.logFile.readDay(today);
 
-    return habits.filter((h) => !h.archived && isScheduledOn(h, today) && !todaysLog.has(h.id));
+    // Pending now means "not yet meeting completion" rather than
+    // "nothing logged" — a numeric habit with a target stays pending
+    // (with its partial progress visible) until the value reaches
+    // target, per the resolved completion rule (see domain/completion.ts).
+    return habits.filter(
+      (h) => !h.archived && isScheduledOn(h, today) && !meetsCompletion(h, todaysLog.get(h.id))
+    );
   }
 
   async getCompletedForToday(): Promise<CompletedHabitEntry[]> {
@@ -113,7 +125,7 @@ export class HabitService {
       if (habit.archived) continue;
       if (!isScheduledOn(habit, today)) continue;
       const value = todaysLog.get(habit.id);
-      if (value !== undefined) completed.push({ habit, value });
+      if (meetsCompletion(habit, value)) completed.push({ habit, value: value as HabitLogValue });
     }
     return completed;
   }
@@ -130,7 +142,7 @@ export class HabitService {
     const logged = await this.logFile.readRange(habit.createdAt, today);
 
     const lookup: LoggedDaysLookup = {
-      isLoggedOn: (date: string) => logged.get(date)?.has(id) ?? false,
+      getValue: (date: string) => logged.get(date)?.get(id),
     };
 
     const stats = calculateHabitStats(habit, lookup, today, rangeStart, weekStartsOn);
@@ -138,7 +150,13 @@ export class HabitService {
     const days: DayClassification[] = [];
     let cursor = rangeStart;
     while (cursor <= today) {
-      days.push({ date: cursor, status: classifyDay(habit, cursor, lookup.isLoggedOn(cursor)) });
+      const value = lookup.getValue(cursor);
+      const done = meetsCompletion(habit, value);
+      // Carry the raw logged value alongside the done/missed/not-scheduled
+      // classification — a numeric habit's magnitude (for the heatmap
+      // spectrum and trend chart) is independent of whether it happened
+      // to meet the completion target that day.
+      days.push({ date: cursor, status: classifyDay(habit, cursor, done), value });
       cursor = addDaysLocal(cursor, 1);
     }
 

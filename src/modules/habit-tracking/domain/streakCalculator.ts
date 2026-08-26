@@ -1,11 +1,13 @@
 // Pure domain logic: streak and completion-rate math. No I/O.
 
-import { HabitDefinition, WeekStartsOn, HabitStats } from './types';
+import { HabitDefinition, WeekStartsOn, HabitStats, HabitLogValue } from './types';
 import { classifyDay, weekBoundsFor } from './scheduleEvaluator';
+import { meetsCompletion } from './completion';
 import { addDaysLocal } from '../../../core/date';
 
 export interface LoggedDaysLookup {
-  isLoggedOn(date: string): boolean;
+  /** The raw logged value for a date, or undefined if nothing was logged that day. Streak/completion math applies meetsCompletion() to this itself — callers should not pre-filter to a boolean. */
+  getValue(date: string): HabitLogValue | undefined;
 }
 
 type PeriodResult = 'met' | 'not-met' | 'not-scheduled';
@@ -25,7 +27,8 @@ function buildDailyPeriods(
   const periods: Period[] = [];
   let cursor = fromDate;
   while (cursor <= toDate) {
-    const status = classifyDay(habit, cursor, log.isLoggedOn(cursor));
+    const done = meetsCompletion(habit, log.getValue(cursor));
+    const status = classifyDay(habit, cursor, done);
     const result: PeriodResult =
       status === 'done' ? 'met' : status === 'missed' ? 'not-met' : 'not-scheduled';
     periods.push({ date: cursor, result });
@@ -63,7 +66,7 @@ function buildWeeklyQuotaPeriods(
         let loggedCount = 0;
         let w = clampedStart;
         while (w <= clampedEnd) {
-          if (log.isLoggedOn(w)) loggedCount++;
+          if (meetsCompletion(habit, log.getValue(w))) loggedCount++;
           w = addDays(w, 1);
         }
 

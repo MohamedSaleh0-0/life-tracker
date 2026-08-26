@@ -53,3 +53,25 @@ describe('buildTrendPoints', () => {
     assert.equal(points.length, 0);
   });
 });
+
+describe('buildTrendPoints — duration type', () => {
+  test('plots elapsed minutes (start->end), not the raw end-time clock value', () => {
+    const entry = makeEntry({ time: '23:30', value: '07:00' }); // sleep, crosses midnight
+    const points = buildTrendPoints([entry], undefined, 'duration');
+    assert.equal(points[0].value, 450); // 7h30m, not 7*60+0=420 (which is what plain time-of-day parsing would give)
+    assert.equal(points[0].label, '7h 30m');
+  });
+
+  test('same-day duration entry', () => {
+    const entry = makeEntry({ time: '14:00', value: '15:30' });
+    const points = buildTrendPoints([entry], undefined, 'duration');
+    assert.equal(points[0].value, 90);
+    assert.equal(points[0].label, '1h 30m');
+  });
+
+  test('without definitionType, a duration entry falls back to being read as a plain time-of-day value (backward-compatible default)', () => {
+    const entry = makeEntry({ time: '23:30', value: '07:00' });
+    const points = buildTrendPoints([entry]); // no third arg
+    assert.equal(points[0].value, 420); // 07:00 read as a clock position, not a duration
+  });
+});

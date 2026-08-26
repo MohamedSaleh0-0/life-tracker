@@ -1,5 +1,11 @@
 // Generic calendar-day heatmap grid. Module-agnostic — takes a
 // caller-defined `status` string per day and a status->color map.
+//
+// Extended with an optional per-day `color` override: some data isn't
+// well modeled as a fixed set of statuses with one color each (e.g. a
+// numeric habit's logged value, which wants a continuous intensity
+// spectrum rather than a flat "done" green). When `color` is present
+// on a day, it wins over the statusColors lookup for that cell only.
 
 import React from 'react';
 
@@ -7,6 +13,8 @@ export interface HeatmapDay {
   date: string;
   status: string;
   label?: string;
+  /** Overrides statusColors[status] for this specific day, e.g. a value-intensity color. */
+  color?: string;
 }
 
 export interface CalendarHeatmapProps {
@@ -79,7 +87,7 @@ export function CalendarHeatmap({
         week.map((date, dayIdx) => {
           if (!date) return null;
           const entry = byDate.get(date);
-          const color = entry ? (statusColors[entry.status] ?? emptyColor) : emptyColor;
+          const color = entry ? entry.color ?? statusColors[entry.status] ?? emptyColor : emptyColor;
           return (
             <rect
               key={date}

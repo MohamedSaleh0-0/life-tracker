@@ -9,6 +9,20 @@
 // amount, quantity, transferPairId, recurringEntryId, shoppingItemId,
 // time. Time and the two traceability ids were added after the format
 // first shipped; empty slots serialize as ''.
+//
+// Bug fix: transactions written by the plugin *before* that field-count
+// grew from 6 to 9 are still sitting in real vaults' log files. The
+// parser used to require an exact 9-field match and threw
+// "Malformed transaction log entry" on anything else — which crashed
+// the entire read (readAll/readDay/readRange, and therefore every
+// balance calculation and every new upsertTransaction, since upsert
+// also reads the day first to merge) the moment a single legacy line
+// was present anywhere in the vault. One old line was enough to make
+// the whole Money view look permanently broken. parseMain now
+// backfills missing trailing fields with safe defaults instead of
+// refusing to load, and the per-line parse is wrapped so a genuinely
+// unparseable entry is skipped rather than taking the whole file down
+// with it.
 
 import { VaultAdapter } from '../../../core/ports/vaultAdapter';
 
@@ -56,10 +70,19 @@ function serializeMain(t: RawTransaction): string {
 }
 
 function parseMain(raw: string): Omit<RawTransaction, 'id' | 'date' | 'name' | 'note'> {
-  const parts = raw.split('|');
-  if (parts.length !== MAIN_FIELD_COUNT) {
+  let parts = raw.split('|');
+
+  if (parts.length > MAIN_FIELD_COUNT) {
     throw new Error(`Malformed transaction log entry: "${raw}"`);
   }
+  if (parts.length < MAIN_FIELD_COUNT) {
+    // Legacy line from before this format grew to 9 fields (see the
+    // header comment) — backfill the missing trailing fields with safe
+    // empty defaults rather than refusing to load the whole file over
+    // one old entry.
+    parts = [...parts, ...new Array(MAIN_FIELD_COUNT - parts.length).fill('')];
+  }
+
   const [accountId, type, categoryId, amount, quantity, transferPairId, recurringEntryId, shoppingItemId, time] =
     parts;
   return {
@@ -71,7 +94,7 @@ function parseMain(raw: string): Omit<RawTransaction, 'id' | 'date' | 'name' | '
     transferPairId,
     recurringEntryId,
     shoppingItemId,
-    time,
+    time: time || '00:00',
   };
 }
 
@@ -136,13 +159,21 @@ export class TransactionLogFile {
       let mainMatch: RegExpExecArray | null;
       while ((mainMatch = MAIN_RE.exec(fieldsRaw)) !== null) {
         const [, id, rawGroup] = mainMatch;
-        entries.push({
-          id,
-          date,
-          ...parseMain(rawGroup),
-          name: names.get(id),
-          note: notes.get(id),
-        });
+        try {
+          entries.push({
+            id,
+            date,
+            ...parseMain(rawGroup),
+            name: names.get(id),
+            note: notes.get(id),
+          });
+        } catch {
+          // A genuinely corrupted single entry (more than 9 fields) is
+          // skipped rather than taking the whole day/file down with it
+          // — "fail safely" per PROJECT_PRINCIPLES, not "fail loudly
+          // and lose everything else on the page."
+          continue;
+        }
       }
       result.set(date, entries);
     }

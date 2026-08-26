@@ -1,9 +1,16 @@
 // 3-step creation/edit wizard (name → type/unit → review), same
 // step-indicator pattern as the habit wizard (REQ-D003), including its
-// three built-in templates (REQ-D002). Same module-level-component +
-// context + useEffect pattern as HabitWizardModal — see that file and
+// built-in templates (REQ-D002). Same module-level-component + context
+// + useEffect pattern as HabitWizardModal — see that file and
 // StepWizard.tsx for why (avoids the render-phase-state bug class
 // entirely).
+//
+// Adds 'duration' as a fourth type: the user logs a start and end time
+// for an activity (sleep, play time, shopping time, ...) instead of
+// computing and typing a number by hand — duration is calculated
+// automatically (src/modules/data-point-tracking/domain/duration.ts).
+// Reuses the existing multi-entry-per-day model, so "more than one
+// sleep/play/shopping entry a day" already just works.
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -18,6 +25,7 @@ const TEMPLATES: { label: string; name: string; type: DataPointType; unit?: stri
   { label: '⚖️ Weight', name: 'Weight', type: 'number', unit: 'kg' },
   { label: '😴 Sleep duration', name: 'Sleep duration', type: 'number', unit: 'hours' },
   { label: '⏰ Wake-up time', name: 'Wake-up time', type: 'time' },
+  { label: '🛌 Sleep (start → end)', name: 'Sleep', type: 'duration' },
 ];
 
 interface WizardCtx {
@@ -63,7 +71,7 @@ function NameStep({ onValidChange }: WizardStepProps) {
       </div>
       <label>
         Name
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mood" />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mood, Play time" />
       </label>
     </div>
   );
@@ -87,6 +95,10 @@ function TypeStep({ onValidChange }: WizardStepProps) {
         Time of day
       </label>
       <label>
+        <input type="radio" checked={type === 'duration'} onChange={() => setType('duration')} />
+        Duration (start → end)
+      </label>
+      <label>
         <input type="radio" checked={type === 'text'} onChange={() => setType('text')} />
         Text
       </label>
@@ -95,6 +107,12 @@ function TypeStep({ onValidChange }: WizardStepProps) {
           Unit (optional)
           <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="kg, steps, glasses..." />
         </label>
+      )}
+      {type === 'duration' && (
+        <p className="ltk-empty">
+          Log a start and end time each entry (e.g. sleep, play time, shopping time) — the duration is calculated
+          for you, and an end time earlier than the start is treated as crossing midnight.
+        </p>
       )}
     </div>
   );
@@ -107,7 +125,8 @@ function ReviewStep({ onValidChange }: WizardStepProps) {
     onValidChange(true);
   }, [onValidChange]);
 
-  const typeLabel = type === 'number' ? 'Number' : type === 'time' ? 'Time of day' : 'Text';
+  const typeLabel =
+    type === 'number' ? 'Number' : type === 'time' ? 'Time of day' : type === 'duration' ? 'Duration (start → end)' : 'Text';
 
   return (
     <div className="ltk-wizard-step ltk-wizard-step--review">

@@ -2,8 +2,16 @@
 // TrendPoints for the chart (REQ-D010). No I/O. Each entry becomes its
 // own point — see design-data-point-tracking.md's resolved Open
 // Question on aggregation (no daily-average mode yet).
+//
+// Duration-type entries need the definition's type passed explicitly:
+// their raw `value` is an end-time string ("HH:MM"), which — without
+// knowing the definition is duration-typed — would otherwise be
+// mistaken for a plain time-of-day value and plotted as a clock
+// position instead of an elapsed duration. `entry.time` (start) and
+// `entry.value` (end) together give the actual duration.
 
-import { DataPointEntry, TrendPoint } from './types';
+import { DataPointEntry, DataPointType, TrendPoint } from './types';
+import { computeDurationMinutes, formatDurationMinutes } from './duration';
 
 function timeToMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
@@ -12,10 +20,22 @@ function timeToMinutes(hhmm: string): number {
 
 const TIME_VALUE_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-export function buildTrendPoints(entries: DataPointEntry[], unit?: string): TrendPoint[] {
+export function buildTrendPoints(entries: DataPointEntry[], unit?: string, definitionType?: DataPointType): TrendPoint[] {
   const points: TrendPoint[] = [];
 
   for (const entry of entries) {
+    if (definitionType === 'duration' && typeof entry.value === 'string') {
+      const minutes = computeDurationMinutes(entry.time, entry.value);
+      points.push({
+        date: entry.date,
+        time: entry.time,
+        value: minutes,
+        label: formatDurationMinutes(minutes),
+        entryId: entry.id,
+      });
+      continue;
+    }
+
     if (typeof entry.value === 'number') {
       points.push({
         date: entry.date,

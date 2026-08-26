@@ -40,6 +40,18 @@ describe('validateEntryValue — time type', () => {
   });
 });
 
+describe('validateEntryValue — duration type (end time)', () => {
+  test('accepts a valid HH:MM end time', () => {
+    const result = validateEntryValue('duration', '07:00');
+    assert.equal(result.valid, true);
+    if (result.valid) assert.equal(result.value, '07:00');
+  });
+
+  test('rejects a non-time string', () => {
+    assert.equal(validateEntryValue('duration', 'whenever').valid, false);
+  });
+});
+
 describe('validateEntryValue — text type', () => {
   test('accepts any non-empty text', () => {
     const result = validateEntryValue('text', 'Felt great today');

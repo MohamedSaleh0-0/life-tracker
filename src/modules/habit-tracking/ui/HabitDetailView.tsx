@@ -1,9 +1,25 @@
 // Streak numbers, calendar heatmap, and the per-habit trend-visibility
 // toggle. See design-habit-tracking.md §Key Flows (Streaks & Heatmap),
 // REQ-H009-H013, REQ-H014-H016.
+//
+// Numeric habits ("drink water: 5 cups") render a violet intensity
+// spectrum on the heatmap (light = low value, deep = high value,
+// relative to target or the max observed) instead of the boolean
+// done/missed/not-scheduled palette, plus a trend line chart and
+// average/best insights.
+//
+// Completion semantics update: a numeric habit with a target now only
+// classifies a day as "done" once the value reaches target (see
+// domain/completion.ts) — a day logged below target classifies as
+// "missed" for streak purposes. The heatmap spectrum is a separate,
+// purely visual concern from that streak math, so it still colors any
+// day with a numeric value logged (regardless of status), rather than
+// only "done" days — otherwise a habit logged consistently at 80% of
+// target would look identical to never having logged it at all.
 
 import React, { useEffect, useState } from 'react';
 import { App } from 'obsidian';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, TooltipProps } from 'recharts';
 import { CalendarHeatmap, HeatmapDay } from '../../../shared/ui-kit/CalendarHeatmap';
 import { HabitService, DeleteRequiresConfirmationError } from '../application/habitService';
 import { HabitDefinition, HabitHistoryResult, WeekStartsOn } from '../domain/types';
@@ -38,6 +54,29 @@ const STATUS_COLORS: Record<string, string> = {
   'not-scheduled': 'var(--background-modifier-border)',
 };
 
+// Violet spectrum for numeric habit intensity — deliberately distinct
+// from the green/red/grey boolean palette above, since a numeric value
+// isn't a pass/fail bit. Light lavender = low relative to target/max,
+// deep violet = at or above it.
+function numericIntensityColor(value: number, denom: number): string {
+  const safeDenom = denom > 0 ? denom : 1;
+  const ratio = Math.max(0, Math.min(1, value / safeDenom));
+  const lightness = 86 - ratio * 56; // 86% (pale) down to 30% (deep)
+  const saturation = 45 + ratio * 35; // 45% up to 80%
+  return `hsl(262, ${saturation}%, ${lightness}%)`;
+}
+
+function TrendTooltip({ active, payload }: TooltipProps<number, string>) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0].payload as { date: string; value: number };
+  return (
+    <div className="ltk-chart-tooltip">
+      <div>{point.date}</div>
+      <strong>{point.value}</strong>
+    </div>
+  );
+}
+
 export function HabitDetailView({
   app,
   habit,
@@ -63,10 +102,38 @@ export function HabitDetailView({
     };
   }, [habit.id, rangeStart, weekStartsOn, habitService]);
 
-  const heatmapDays: HeatmapDay[] = (history?.days ?? []).map((d) => ({
-    date: d.date,
-    status: d.status,
-  }));
+  const isNumeric = habit.type === 'numeric';
+
+  const numericValues = (history?.days ?? [])
+    .map((d) => d.value)
+    .filter((v): v is number => typeof v === 'number');
+  const maxObserved = numericValues.length > 0 ? Math.max(...numericValues) : 0;
+  const intensityDenom = habit.target?.value ?? maxObserved;
+
+  const heatmapDays: HeatmapDay[] = (history?.days ?? []).map((d) => {
+    // Color by "was a value logged", not "status === done" — a
+    // below-target day is now classified 'missed' for streak purposes
+    // but should still show its magnitude on the spectrum, not vanish.
+    if (isNumeric && typeof d.value === 'number') {
+      const unit = habit.target?.unit ? ` ${habit.target.unit}` : '';
+      const metTarget = habit.target ? d.value >= habit.target.value : true;
+      return {
+        date: d.date,
+        status: d.status,
+        color: numericIntensityColor(d.value, intensityDenom),
+        label: `${d.date}: ${d.value}${unit}${habit.target ? (metTarget ? ' ✓' : ' (below target)') : ''}`,
+      };
+    }
+    return { date: d.date, status: d.status };
+  });
+
+  const trendData = (history?.days ?? [])
+    .filter((d): d is typeof d & { value: number } => typeof d.value === 'number')
+    .map((d) => ({ date: d.date, value: d.value }));
+
+  const average =
+    numericValues.length > 0 ? numericValues.reduce((sum, v) => sum + v, 0) / numericValues.length : 0;
+  const best = numericValues.length > 0 ? Math.max(...numericValues) : 0;
 
   const handleEditClick = () => {
     new HabitWizardModal(app, habitService, weekStartsOn, habit, onEdited).open();
@@ -118,6 +185,24 @@ export function HabitDetailView({
             <span className="ltk-stat__value">{Math.round(history.completionRate * 100)}%</span>
             <span className="ltk-stat__label">Completion rate</span>
           </div>
+          {isNumeric && (
+            <>
+              <div className="ltk-stat">
+                <span className="ltk-stat__value">
+                  {average % 1 === 0 ? average : average.toFixed(1)}
+                  {habit.target?.unit ? <span className="ltk-stat__unit"> {habit.target.unit}</span> : null}
+                </span>
+                <span className="ltk-stat__label">Average logged</span>
+              </div>
+              <div className="ltk-stat">
+                <span className="ltk-stat__value">
+                  {best}
+                  {habit.target?.unit ? <span className="ltk-stat__unit"> {habit.target.unit}</span> : null}
+                </span>
+                <span className="ltk-stat__label">Best day</span>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -131,7 +216,40 @@ export function HabitDetailView({
       </label>
 
       {habit.trendVisible && heatmapDays.length > 0 && (
-        <CalendarHeatmap days={heatmapDays} statusColors={STATUS_COLORS} weekStartsOn={weekStartsOn} />
+        <>
+          <CalendarHeatmap days={heatmapDays} statusColors={STATUS_COLORS} weekStartsOn={weekStartsOn} />
+          {isNumeric ? (
+            <div className="ltk-heatmap-legend">
+              <span>Low</span>
+              <span
+                className="ltk-heatmap-legend__swatch"
+                style={{
+                  background: `linear-gradient(90deg, ${numericIntensityColor(0.05 * intensityDenom, intensityDenom)}, ${numericIntensityColor(intensityDenom, intensityDenom)})`,
+                }}
+              />
+              <span>High{habit.target ? ` (target: ${habit.target.value}${habit.target.unit ? ' ' + habit.target.unit : ''})` : ''}</span>
+            </div>
+          ) : (
+            <div className="ltk-heatmap-legend">
+              <span className="ltk-heatmap-legend__dot" style={{ background: STATUS_COLORS.done }} /> Done
+              <span className="ltk-heatmap-legend__dot" style={{ background: STATUS_COLORS.missed }} /> Missed
+              <span className="ltk-heatmap-legend__dot" style={{ background: STATUS_COLORS['not-scheduled'] }} /> Not scheduled
+            </div>
+          )}
+        </>
+      )}
+
+      {habit.trendVisible && isNumeric && trendData.length > 1 && (
+        <div className="ltk-habit-detail__chart">
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={trendData}>
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} width={32} />
+              <Tooltip content={<TrendTooltip />} />
+              <Line type="monotone" dataKey="value" stroke="hsl(262, 70%, 55%)" dot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       )}
 
       <div className="ltk-habit-detail__lifecycle-actions">

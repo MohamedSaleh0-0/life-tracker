@@ -1,0 +1,47 @@
+/* ---------- Round 2 additions — appended, nothing above changed ---------- */
+
+/* Progress hint on a pending numeric habit row, e.g. "3/8 cups" —
+   shown now that a numeric habit with a target stays in Pending (with
+   partial progress visible) until it actually reaches target, instead
+   of moving to Completed on any log. */
+.ltk-habit-row__progress {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Money view load-error banner — surfaces a failed data fetch instead
+   of silently leaving the empty-state UI on screen with no indication
+   anything went wrong. */
+.ltk-money-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--text-error);
+  background: var(--background-secondary);
+  color: var(--text-error);
+  margin-bottom: 12px;
+  font-size: var(--font-ui-small);
+}
+
+.ltk-money-load-error button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--text-error);
+  background: transparent;
+  color: var(--text-error);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ltk-money-load-error button:hover {
+  background: var(--text-error);
+  color: var(--text-on-accent);
+}

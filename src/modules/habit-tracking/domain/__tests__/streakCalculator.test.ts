@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateHabitStats, LoggedDaysLookup } from '../streakCalculator';
-import { HabitDefinition } from '../types';
+import { HabitDefinition, HabitLogValue } from '../types';
 
 function makeHabit(overrides: Partial<HabitDefinition> = {}): HabitDefinition {
   return {
@@ -19,9 +19,15 @@ function makeHabit(overrides: Partial<HabitDefinition> = {}): HabitDefinition {
   };
 }
 
+/** Boolean-style helper for tests that only care about logged/not-logged (matches every prior test's intent — presence of any value should still count for these habits, since none of them set a numeric target). */
 function loggedOn(dates: string[]): LoggedDaysLookup {
   const set = new Set(dates);
-  return { isLoggedOn: (d) => set.has(d) };
+  return { getValue: (d) => (set.has(d) ? true : undefined) };
+}
+
+/** For numeric-with-target tests: an explicit date -> value map. */
+function valuesOn(values: Record<string, number>): LoggedDaysLookup {
+  return { getValue: (d) => values[d] };
 }
 
 describe('calculateHabitStats — daily habits', () => {
@@ -109,6 +115,44 @@ describe('calculateHabitStats — weeklyQuota habits', () => {
     });
     const log = loggedOn(['2026-08-03', '2026-08-05', '2026-08-07', '2026-08-11']);
     const stats = calculateHabitStats(habit, log, '2026-08-12', '2026-08-03', 'monday');
+    assert.equal(stats.currentStreak, 1);
+  });
+});
+
+describe('calculateHabitStats — numeric habits with a target (completion gate)', () => {
+  test('a logged value below target does NOT count as met', () => {
+    const habit = makeHabit({
+      type: 'numeric',
+      target: { value: 8, unit: 'cups' },
+      schedule: { mode: 'daily' },
+      createdAt: '2026-08-17',
+    });
+    const log = valuesOn({ '2026-08-17': 3 });
+    const stats = calculateHabitStats(habit, log, '2026-08-17', '2026-08-01', 'monday');
+    assert.equal(stats.currentStreak, 0);
+    assert.equal(stats.completionRate, 0);
+  });
+
+  test('a logged value meeting or exceeding target counts as met', () => {
+    const habit = makeHabit({
+      type: 'numeric',
+      target: { value: 8, unit: 'cups' },
+      schedule: { mode: 'daily' },
+      createdAt: '2026-08-17',
+    });
+    const log = valuesOn({ '2026-08-17': 8, '2026-08-18': 10 });
+    const stats = calculateHabitStats(habit, log, '2026-08-18', '2026-08-01', 'monday');
+    assert.equal(stats.currentStreak, 2);
+  });
+
+  test('a numeric habit with no target still counts any logged value as met', () => {
+    const habit = makeHabit({
+      type: 'numeric',
+      schedule: { mode: 'daily' },
+      createdAt: '2026-08-17',
+    });
+    const log = valuesOn({ '2026-08-17': 1 });
+    const stats = calculateHabitStats(habit, log, '2026-08-17', '2026-08-01', 'monday');
     assert.equal(stats.currentStreak, 1);
   });
 });

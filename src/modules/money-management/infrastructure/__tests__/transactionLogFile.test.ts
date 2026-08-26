@@ -140,3 +140,67 @@ describe('TransactionLogFile round-trip', () => {
     await assert.rejects(() => log.readDay('2026-08-19'), TransactionLogFileReadError);
   });
 });
+
+describe('TransactionLogFile — legacy format backward compatibility', () => {
+  test('reads a pre-existing 6-field line (from before time/recurringEntryId/shoppingItemId were added) without throwing', async () => {
+    const adapter = new FakeVaultAdapter();
+    await adapter.createFolder('Life Tracker/Logs/Money');
+    await adapter.writeFile(
+      'Life Tracker/Logs/Money/transactions-2026.md',
+      '- 2026-08-19 [tx-legacy1:: NSIcRH|income||200||]\n'
+    );
+    const log = new TransactionLogFile(adapter);
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.length, 1);
+    assert.equal(day[0].accountId, 'NSIcRH');
+    assert.equal(day[0].type, 'income');
+    assert.equal(day[0].amount, '200');
+    assert.equal(day[0].recurringEntryId, '');
+    assert.equal(day[0].shoppingItemId, '');
+    assert.equal(day[0].time, '00:00');
+  });
+
+  test('readAll and balance-relevant reads still succeed when a legacy line sits alongside current-format lines', async () => {
+    const adapter = new FakeVaultAdapter();
+    await adapter.createFolder('Life Tracker/Logs/Money');
+    await adapter.writeFile(
+      'Life Tracker/Logs/Money/transactions-2026.md',
+      '- 2026-08-19 [tx-legacy1:: NSIcRH|income||200||]\n' +
+        '- 2026-08-20 [tx-new1:: NSIcRH|expense|food|-20||||08:15]\n'
+    );
+    const log = new TransactionLogFile(adapter);
+
+    const all = await log.readAll();
+    assert.equal(all.length, 2);
+  });
+
+  test('writing a new transaction (upsert) succeeds even when the year file already has a legacy line', async () => {
+    const adapter = new FakeVaultAdapter();
+    await adapter.createFolder('Life Tracker/Logs/Money');
+    await adapter.writeFile(
+      'Life Tracker/Logs/Money/transactions-2026.md',
+      '- 2026-08-19 [tx-legacy1:: NSIcRH|income||200||]\n'
+    );
+    const log = new TransactionLogFile(adapter);
+
+    await log.upsertTransaction(makeRaw({ id: 't2', date: '2026-08-19', amount: '-20' }));
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.length, 2);
+  });
+
+  test('a truly malformed entry (more than 9 fields) is skipped, not thrown, so it does not take the rest of the day down with it', async () => {
+    const adapter = new FakeVaultAdapter();
+    await adapter.createFolder('Life Tracker/Logs/Money');
+    await adapter.writeFile(
+      'Life Tracker/Logs/Money/transactions-2026.md',
+      '- 2026-08-19 [tx-bad:: a|b|c|d|e|f|g|h|i|j|k] [tx-good:: a1|expense|food|-20||||08:15]\n'
+    );
+    const log = new TransactionLogFile(adapter);
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.length, 1);
+    assert.equal(day[0].id, 'good');
+  });
+});

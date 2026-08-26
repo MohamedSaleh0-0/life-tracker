@@ -417,12 +417,14 @@
 
 .ltk-habit-detail__stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 16px;
 }
 
 .ltk-stat {
   flex: 1;
+  min-width: 90px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -436,6 +438,12 @@
   font-size: 1.6em;
   font-weight: 700;
   color: var(--interactive-accent);
+}
+
+.ltk-stat__unit {
+  font-size: 0.55em;
+  font-weight: 500;
+  color: var(--text-faint);
 }
 
 .ltk-stat__label {
@@ -453,6 +461,14 @@
   font-size: var(--font-ui-small);
   color: var(--text-muted);
   margin-bottom: 12px;
+}
+
+.ltk-habit-detail__chart {
+  border-radius: var(--radius-m);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  padding: 8px;
+  margin: 8px 0 16px 0;
 }
 
 .ltk-habit-detail__lifecycle-actions {
@@ -474,6 +490,35 @@
 
 .ltk-calendar-heatmap rect:hover {
   opacity: 0.7;
+}
+
+/* Legend under the heatmap — explains the numeric intensity spectrum
+   (or the boolean done/missed/not-scheduled colors) so the coloring
+   isn't left to guesswork. */
+.ltk-heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  margin: 2px 0 12px 0;
+  flex-wrap: wrap;
+}
+
+.ltk-heatmap-legend__swatch {
+  display: inline-block;
+  width: 48px;
+  height: 10px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ltk-heatmap-legend__dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-left: 4px;
 }
 
 /* ---------- Data Point Tracking ---------- */
@@ -901,6 +946,56 @@
 
 .ltk-entry-form__checkbox input[type='checkbox'] {
   width: auto;
+}
+
+/* Inline "+ New category" / "+ New list" creation row — appears right
+   under the select when its "+ New…" option is chosen, so creating a
+   missing category or shopping list doesn't require leaving the
+   transaction form. */
+.ltk-inline-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: -4px 0 10px 0;
+  padding: 8px;
+  border-radius: var(--radius-s);
+  border: 1px dashed var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.ltk-inline-create input,
+.ltk-inline-create select {
+  flex: 1 1 140px;
+  min-width: 120px;
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ltk-inline-create button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ltk-inline-create button:first-of-type {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+.ltk-inline-create button:hover {
+  background: var(--background-modifier-hover);
 }
 
 /* ---------- Recurring entries "needs attention" ---------- */

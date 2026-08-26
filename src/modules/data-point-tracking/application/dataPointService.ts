@@ -92,7 +92,7 @@ export class DataPointService {
     return all.filter((d) => !d.archived).sort((a, b) => a.order - b.order);
   }
 
-  /** Logs a brand-new entry (REQ-D005/D006), validated against the definition's type (REQ-D009). */
+  /** Logs a brand-new entry (REQ-D005/D006), validated against the definition's type (REQ-D009). `date` defaults to today via the caller, but may be backdated. */
   async logEntry(definitionId: string, date: string, time: string, rawInput: string): Promise<DataPointEntry> {
     const definition = await this.requireDefinition(definitionId);
     const validated = this.validateOrThrow(definition, rawInput);
@@ -147,7 +147,7 @@ export class DataPointService {
     return grouped;
   }
 
-  /** All of one data point's entries in a date range, typed per its definition — for the trend chart (number/time) or recent-entries list (text). REQ-D010/D011. */
+  /** All of one data point's entries in a date range, typed per its definition — for the trend chart (number/time/duration) or recent-entries list (text). REQ-D010/D011. */
   async getEntriesInRange(definitionId: string, rangeStart: string, rangeEnd: string): Promise<DataPointEntry[]> {
     const definition = await this.requireDefinition(definitionId);
     const raw = await this.logFile.readRange(rangeStart, rangeEnd);
@@ -157,11 +157,11 @@ export class DataPointService {
       .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   }
 
-  /** Trend points for a number/time-of-day data point over a range (REQ-D010). Text-type data points have no numeric trend — see design doc's resolved Open Question. */
+  /** Trend points for a number/time-of-day/duration data point over a range (REQ-D010). Text-type data points have no numeric trend — see design doc's resolved Open Question. */
   async getTrend(definitionId: string, rangeStart: string, rangeEnd: string): Promise<TrendPoint[]> {
     const definition = await this.requireDefinition(definitionId);
     const entries = await this.getEntriesInRange(definitionId, rangeStart, rangeEnd);
-    return buildTrendPoints(entries, definition.unit);
+    return buildTrendPoints(entries, definition.unit, definition.type);
   }
 
   private async requireDefinition(id: string): Promise<DataPointDefinition> {

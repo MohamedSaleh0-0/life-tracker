@@ -1,9 +1,7 @@
-// Trend chart (Recharts) for number/time-of-day data points, or a
-// recent-entries list for text data points (REQ-D010/D011) — the type
-// determines which is shown, per the requirements doc's explicit
-// distinction ("text data points shown as a recent-entries list, since
-// there's nothing numeric to chart"). Plus edit/archive/delete
-// lifecycle actions, mirroring HabitDetailView.
+// Trend chart (Recharts) for number/time-of-day/duration data points,
+// or a recent-entries list for text data points (REQ-D010/D011) — the
+// type determines which is shown. Plus edit/archive/delete lifecycle
+// actions, mirroring HabitDetailView.
 
 import React, { useEffect, useState } from 'react';
 import { App } from 'obsidian';
@@ -13,6 +11,7 @@ import { DataPointDefinition, DataPointEntry, TrendPoint } from '../domain/types
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
 import { DataPointWizardModal } from './DataPointWizardModal';
 import { ConfirmModal } from '../../../shared/ui-kit/ConfirmModal';
+import { formatDurationMinutes } from '../domain/duration';
 
 export interface DataPointDetailViewProps {
   app: App;
@@ -60,11 +59,13 @@ export function DataPointDetailView({
   const [textEntries, setTextEntries] = useState<DataPointEntry[] | null>(null);
   const [rangeStart] = useState(() => addDaysLocal(getTodayLocal(), -90));
 
+  const isChartType = dataPoint.type !== 'text';
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const today = getTodayLocal();
-      if (dataPoint.type === 'text') {
+      if (!isChartType) {
         const entries = await dataPointService.getEntriesInRange(dataPoint.id, rangeStart, today);
         if (!cancelled) setTextEntries(entries.slice().reverse());
       } else {
@@ -75,7 +76,7 @@ export function DataPointDetailView({
     return () => {
       cancelled = true;
     };
-  }, [dataPoint.id, dataPoint.type, rangeStart, dataPointService]);
+  }, [dataPoint.id, dataPoint.type, isChartType, rangeStart, dataPointService]);
 
   const handleEditClick = () => {
     new DataPointWizardModal(app, dataPointService, dataPoint, onEdited).open();
@@ -118,7 +119,7 @@ export function DataPointDetailView({
         <h2>{dataPoint.name}</h2>
       </header>
 
-      {dataPoint.type === 'text' ? (
+      {!isChartType ? (
         <ul className="ltk-datapoint-detail__text-list">
           {textEntries === null && <li className="ltk-empty">Loading…</li>}
           {textEntries?.length === 0 && <li className="ltk-empty">No entries yet.</li>}
@@ -139,8 +140,14 @@ export function DataPointDetailView({
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                 <YAxis
                   tick={{ fontSize: 10 }}
-                  tickFormatter={dataPoint.type === 'time' ? (v: number) => minutesToHHMM(v) : undefined}
-                  width={dataPoint.type === 'time' ? 44 : 32}
+                  tickFormatter={
+                    dataPoint.type === 'time'
+                      ? (v: number) => minutesToHHMM(v)
+                      : dataPoint.type === 'duration'
+                        ? (v: number) => formatDurationMinutes(v)
+                        : undefined
+                  }
+                  width={dataPoint.type === 'time' || dataPoint.type === 'duration' ? 48 : 32}
                 />
                 <Tooltip content={<TrendTooltip />} />
                 <Line type="monotone" dataKey="value" stroke="var(--interactive-accent)" dot={{ r: 3 }} />

@@ -8,6 +8,14 @@
 // navigation. Found the hard way: the "Confirm" button below was
 // missing it, so re-confirming a habit silently punted you into its
 // detail page with no way back (see HabitDetailView's new onBack).
+//
+// Update: a numeric habit with a target now stays in "Pending" until
+// the logged value actually reaches target (domain/completion.ts) —
+// previously any log at all moved it to Completed. The pending
+// stepper now seeds from today's actual partial progress (via
+// getTodayLog) instead of always starting at 0, and shows a
+// "current/target unit" hint, so continuing to log toward the target
+// doesn't feel like it's throwing away what was already entered.
 
 import React, { useEffect, useState } from 'react';
 import { HabitService, CompletedHabitEntry } from '../application/habitService';
@@ -99,11 +107,13 @@ function NumericStepper({
 export function HabitDashboardList({ habitService, onOpenDetail }: HabitDashboardListProps) {
   const [pending, setPending] = useState<HabitDefinition[]>([]);
   const [completed, setCompleted] = useState<CompletedHabitEntry[]>([]);
+  const [todayLog, setTodayLog] = useState<Map<string, HabitLogValue>>(new Map());
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const refresh = async () => {
     setPending(await habitService.getPendingForToday());
     setCompleted(await habitService.getCompletedForToday());
+    setTodayLog(await habitService.getTodayLog());
   };
 
   useEffect(() => {
@@ -128,25 +138,39 @@ export function HabitDashboardList({ habitService, onOpenDetail }: HabitDashboar
       <section className="ltk-habit-dashboard__pending">
         <h3>Pending</h3>
         {pending.length === 0 && <p className="ltk-empty">Nothing pending — nice work.</p>}
-        {pending.map((habit) => (
-          <div key={habit.id} className="ltk-habit-row" onClick={() => onOpenDetail(habit)}>
-            <span className="ltk-habit-row__icon">{habit.icon}</span>
-            <span className="ltk-habit-row__name">{habit.name}</span>
-            {habit.type === 'boolean' ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleBooleanComplete(habit);
-                }}
-              >
-                Done
-              </button>
-            ) : (
-              <NumericStepper habit={habit} initialValue={0} onSubmit={(value) => handleNumericSubmit(habit, value)} />
-            )}
-          </div>
-        ))}
+        {pending.map((habit) => {
+          const loggedValue = todayLog.get(habit.id);
+          const currentValue = typeof loggedValue === 'number' ? loggedValue : 0;
+          return (
+            <div key={habit.id} className="ltk-habit-row" onClick={() => onOpenDetail(habit)}>
+              <span className="ltk-habit-row__icon">{habit.icon}</span>
+              <span className="ltk-habit-row__name">{habit.name}</span>
+              {habit.type === 'numeric' && habit.target && (
+                <span className="ltk-habit-row__progress">
+                  {currentValue}/{habit.target.value}
+                  {habit.target.unit ? ` ${habit.target.unit}` : ''}
+                </span>
+              )}
+              {habit.type === 'boolean' ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleBooleanComplete(habit);
+                  }}
+                >
+                  Done
+                </button>
+              ) : (
+                <NumericStepper
+                  habit={habit}
+                  initialValue={currentValue}
+                  onSubmit={(value) => handleNumericSubmit(habit, value)}
+                />
+              )}
+            </div>
+          );
+        })}
       </section>
 
       <section className="ltk-habit-dashboard__completed">

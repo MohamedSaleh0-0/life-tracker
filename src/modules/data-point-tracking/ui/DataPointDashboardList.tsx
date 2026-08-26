@@ -9,6 +9,7 @@ import { App } from 'obsidian';
 import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition, DataPointEntry } from '../domain/types';
 import { DataPointEntryModal } from './DataPointEntryModal';
+import { computeDurationMinutes, formatDurationMinutes } from '../domain/duration';
 
 export interface DataPointDashboardListProps {
   app: App;
@@ -19,6 +20,10 @@ export interface DataPointDashboardListProps {
 function formatEntryValue(definition: DataPointDefinition, entry: DataPointEntry): string {
   if (definition.type === 'number') {
     return definition.unit ? `${entry.value} ${definition.unit}` : String(entry.value);
+  }
+  if (definition.type === 'duration' && typeof entry.value === 'string') {
+    const minutes = computeDurationMinutes(entry.time, entry.value);
+    return `${entry.time} → ${entry.value} (${formatDurationMinutes(minutes)})`;
   }
   return String(entry.value);
 }

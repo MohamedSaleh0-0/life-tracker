@@ -3,6 +3,15 @@
 // rather than four separate forms. For expense, also offers "add to a
 // shopping list instead of logging it now" right in this same flow
 // (per the user's explicit ask — not a separate command).
+//
+// Update: three ergonomics asks addressed in this pass —
+//  1. Category picker can now create a brand-new main category, or a
+//     new subcategory under an existing main category, inline —
+//     instead of forcing a trip to Settings first.
+//  2. "Add to a shopping list instead" can now create a brand-new
+//     shopping list inline too, same pattern as (1).
+//  3. Amount is now a -5/+5 stepper (mirrors the habit dashboard's
+//     NumericStepper) with the number still directly editable by hand.
 
 import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -13,9 +22,52 @@ import { Account, ShoppingList, TransactionType } from '../domain/types';
 import { CategoryNode } from '../domain/categoryTree';
 import { getTodayLocal } from '../../../core/date';
 
+const NEW_OPTION = '__new__';
+
 function nowHHMM(): string {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+/** -5/+5 stepper with the number still directly editable — same interaction pattern as HabitDashboardList's NumericStepper, reused here for transaction amounts. */
+function AmountStepper({
+  value,
+  onChange,
+  step = 5,
+  placeholder,
+  required,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  step?: number;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  const adjust = (delta: number) => {
+    const current = Number(value) || 0;
+    const next = Math.round((current + delta) * 100) / 100;
+    onChange(String(next));
+  };
+
+  return (
+    <div className="ltk-numeric-stepper">
+      <button type="button" onClick={() => adjust(-step)} aria-label="Decrease amount">
+        −
+      </button>
+      <input
+        type="number"
+        step="any"
+        className="ltk-numeric-stepper__value"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        required={required}
+      />
+      <button type="button" onClick={() => adjust(step)} aria-label="Increase amount">
+        +
+      </button>
+    </div>
+  );
 }
 
 interface TransactionFormProps {
@@ -41,6 +93,13 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Inline "+ New category / subcategory" — REQ-M005's category field,
+  // extended so a missing category doesn't require backing out to
+  // Settings mid-entry.
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryParentId, setNewCategoryParentId] = useState('');
+
   // "Add to a shopping list instead" — only offered for expenses, per
   // the request that this live inside the transaction flow rather than
   // a separate command.
@@ -49,10 +108,17 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
   const [shoppingListId, setShoppingListId] = useState('');
   const [dueDate, setDueDate] = useState('');
 
+  // Inline "+ New list" — same pattern as the category creator above.
+  const [showNewList, setShowNewList] = useState(false);
+  const [newListName, setNewListName] = useState('');
+
   useEffect(() => {
     if (type === 'expense' || type === 'income') {
       moneyService.getCategoryTree(type).then(setCategoryTree);
     }
+    // A category tree from one kind isn't valid for the other — reset
+    // any in-progress inline creation when the type switches.
+    setShowNewCategory(false);
   }, [type, moneyService]);
 
   useEffect(() => {
@@ -65,8 +131,54 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
         setShoppingLists(lists);
         setShoppingListId((prev) => prev || lists[0]?.id || '');
       });
+    } else {
+      setShowNewList(false);
     }
   }, [addToShoppingList, moneyService]);
+
+  const handleCategorySelect = (value: string) => {
+    if (value === NEW_OPTION) {
+      setShowNewCategory(true);
+      return;
+    }
+    setCategoryId(value);
+  };
+
+  const handleCreateCategory = async () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+    const kind = type === 'income' ? 'income' : 'expense';
+    const created = await moneyService.createCategory({
+      kind,
+      name: trimmed,
+      parentId: newCategoryParentId || undefined,
+    });
+    const tree = await moneyService.getCategoryTree(kind);
+    setCategoryTree(tree);
+    setCategoryId(created.id);
+    setShowNewCategory(false);
+    setNewCategoryName('');
+    setNewCategoryParentId('');
+  };
+
+  const handleShoppingListSelect = (value: string) => {
+    if (value === NEW_OPTION) {
+      setShowNewList(true);
+      return;
+    }
+    setShoppingListId(value);
+  };
+
+  const handleCreateList = async () => {
+    const trimmed = newListName.trim();
+    if (!trimmed) return;
+    const created = await moneyService.createShoppingList(trimmed);
+    const lists = await moneyService.getShoppingLists();
+    setShoppingLists(lists);
+    setShoppingListId(created.id);
+    setShowNewList(false);
+    setNewListName('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -189,15 +301,32 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
         <>
           <label>
             Shopping list
-            <select value={shoppingListId} onChange={(e) => setShoppingListId(e.target.value)}>
-              {shoppingLists.length === 0 && <option value="">No lists yet — create one first</option>}
+            <select value={showNewList ? NEW_OPTION : shoppingListId} onChange={(e) => handleShoppingListSelect(e.target.value)}>
+              {shoppingLists.length === 0 && !showNewList && <option value="">No lists yet</option>}
               {shoppingLists.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
                 </option>
               ))}
+              <option value={NEW_OPTION}>+ New list…</option>
             </select>
           </label>
+          {showNewList && (
+            <div className="ltk-inline-create">
+              <input
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                placeholder="e.g. Groceries"
+                autoFocus
+              />
+              <button type="button" onClick={handleCreateList}>
+                Add
+              </button>
+              <button type="button" onClick={() => setShowNewList(false)}>
+                Cancel
+              </button>
+            </div>
+          )}
           <label>
             Item name
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Milk" />
@@ -230,22 +359,49 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
       )}
 
       {(type === 'expense' || type === 'income') && (
-        <label>
-          Category
-          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">Uncategorized</option>
-            {categoryTree.map((node) => (
-              <React.Fragment key={node.category.id}>
-                <option value={node.category.id}>{node.category.name}</option>
-                {node.children.map((child) => (
-                  <option key={child.id} value={child.id}>
-                    &nbsp;&nbsp;{child.name}
+        <>
+          <label>
+            Category
+            <select value={showNewCategory ? NEW_OPTION : categoryId} onChange={(e) => handleCategorySelect(e.target.value)}>
+              <option value="">Uncategorized</option>
+              {categoryTree.map((node) => (
+                <React.Fragment key={node.category.id}>
+                  <option value={node.category.id}>{node.category.name}</option>
+                  {node.children.map((child) => (
+                    <option key={child.id} value={child.id}>
+                      &nbsp;&nbsp;{child.name}
+                    </option>
+                  ))}
+                </React.Fragment>
+              ))}
+              <option value={NEW_OPTION}>+ New category / subcategory…</option>
+            </select>
+          </label>
+          {showNewCategory && (
+            <div className="ltk-inline-create">
+              <input
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="New category name"
+                autoFocus
+              />
+              <select value={newCategoryParentId} onChange={(e) => setNewCategoryParentId(e.target.value)}>
+                <option value="">As a main category</option>
+                {categoryTree.map((node) => (
+                  <option key={node.category.id} value={node.category.id}>
+                    Sub of: {node.category.name}
                   </option>
                 ))}
-              </React.Fragment>
-            ))}
-          </select>
-        </label>
+              </select>
+              <button type="button" onClick={handleCreateCategory}>
+                Add
+              </button>
+              <button type="button" onClick={() => setShowNewCategory(false)}>
+                Cancel
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       <label>
@@ -254,11 +410,9 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
           : addToShoppingList && type === 'expense'
             ? 'Estimated price (optional — can decide when buying)'
             : 'Amount'}
-        <input
-          type="number"
-          step="any"
+        <AmountStepper
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={setAmount}
           placeholder="0.00"
           required={!(addToShoppingList && type === 'expense')}
         />

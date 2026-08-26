@@ -3,6 +3,14 @@
 // flow. Same safety pattern as everything else built after the
 // StepWizard incident: no render-phase state tricks, ErrorBoundary
 // wraps the mount.
+//
+// - Date field lets an entry be backdated (e.g. logging what sleep
+//   time was two days ago), locked while editing an existing entry —
+//   the service addresses an edit by { entryId, date }, and moving an
+//   entry between days isn't handled by editEntry yet.
+// - Duration type reuses the existing time/value fields as Start/End
+//   time rather than adding new state: `time` = activity start,
+//   `value` = activity end (validated as HH:MM, same as time type).
 
 import React, { useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -28,19 +36,21 @@ interface EntryFormProps {
 }
 
 function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSaved }: EntryFormProps) {
+  const [date, setDate] = useState(existingEntry?.date ?? getTodayLocal());
   const [time, setTime] = useState(existingEntry?.time ?? nowHHMM());
   const [value, setValue] = useState(existingEntry ? String(existingEntry.value) : '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const isDuration = definition.type === 'duration';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      const date = existingEntry?.date ?? getTodayLocal();
       if (existingEntry) {
-        await dataPointService.editEntry(existingEntry.id, definition.id, date, time, value);
+        await dataPointService.editEntry(existingEntry.id, definition.id, existingEntry.date, time, value);
       } else {
         await dataPointService.logEntry(definition.id, date, time, value);
       }
@@ -55,14 +65,25 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
   return (
     <form className="ltk-entry-form" onSubmit={handleSubmit}>
       <label>
-        Time
+        Date
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          max={getTodayLocal()}
+          disabled={!!existingEntry}
+          required
+        />
+      </label>
+      <label>
+        {isDuration ? 'Start time' : 'Time'}
         <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
       </label>
       <label>
-        Value
+        {isDuration ? 'End time' : 'Value'}
         {definition.type === 'text' ? (
           <textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder="What's up?" />
-        ) : definition.type === 'time' ? (
+        ) : definition.type === 'time' || isDuration ? (
           <input type="time" value={value} onChange={(e) => setValue(e.target.value)} />
         ) : (
           <input
@@ -74,6 +95,9 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
           />
         )}
       </label>
+      {isDuration && (
+        <p className="ltk-empty">An end time earlier than the start is treated as crossing midnight.</p>
+      )}
       {error && <p className="ltk-form-error">{error}</p>}
       <div className="ltk-entry-form__actions">
         <button type="button" onClick={onCancel} disabled={submitting}>

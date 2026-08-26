@@ -25,6 +25,14 @@ export function validateEntryValue(type: DataPointType, raw: string): Validation
     return { valid: true, value: trimmed };
   }
 
+  if (type === 'duration') {
+    // The validated value is the activity's end time; its start time
+    // lives in the entry's separate `time` field, validated by the UI
+    // the same way any HH:MM input is.
+    if (!TIME_RE.test(trimmed)) return { valid: false, error: 'Enter an end time as HH:MM (24-hour).' };
+    return { valid: true, value: trimmed };
+  }
+
   if (trimmed === '') return { valid: false, error: 'Enter a value.' };
   return { valid: true, value: raw };
 }
