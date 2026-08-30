@@ -48,3 +48,15 @@ export function addMonthsLocal(dateStr: string, n: number, dayOfMonth?: number):
   const result = new Date(d.getFullYear(), d.getMonth() + n, targetDay);
   return toLocalDateString(result);
 }
+
+/**
+ * Returns the [startDate, endDate] (inclusive, YYYY-MM-DD) of the
+ * calendar month containing `dateStr` — used by Money Management's
+ * category budgets, which reset every calendar month.
+ */
+export function monthBoundsFor(dateStr: string): [string, string] {
+  const d = parseLocalDate(dateStr);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0); // day 0 of next month = last day of this month
+  return [toLocalDateString(start), toLocalDateString(end)];
+}

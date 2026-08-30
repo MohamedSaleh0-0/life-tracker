@@ -1,13 +1,13 @@
-// CRUD for Account[], Category[], ExchangeRates, RecurringEntry[], and
-// ShoppingList[]/ShoppingItem[] against the plugin's settings blob
-// (REQ-C008), under their own top-level keys — same data.json,
-// separate keys from other modules'. Recurring entries and shopping
-// items are definitions/state that change status over time but aren't
-// time-series log data the way transactions are, so per
-// PROJECT_PRINCIPLES.md's storage model they belong in settings, not
-// the markdown log.
+// CRUD for Account[], Category[], ExchangeRates, RecurringEntry[],
+// ShoppingList[]/ShoppingItem[], and CategoryBudget[] against the
+// plugin's settings blob (REQ-C008), under their own top-level keys —
+// same data.json, separate keys from other modules'. Recurring
+// entries, shopping items, and budgets are definitions/state that
+// change over time but aren't time-series log data the way
+// transactions are, so per PROJECT_PRINCIPLES.md's storage model they
+// belong in settings, not the markdown log.
 
-import { Account, Category, ExchangeRates, RecurringEntry, ShoppingList, ShoppingItem } from '../domain/types';
+import { Account, Category, ExchangeRates, RecurringEntry, ShoppingList, ShoppingItem, CategoryBudget } from '../domain/types';
 import { SettingsAdapter } from '../../../core/ports/settingsAdapter';
 
 interface LifeTrackerData {
@@ -17,6 +17,7 @@ interface LifeTrackerData {
   recurringEntries?: RecurringEntry[];
   shoppingLists?: ShoppingList[];
   shoppingItems?: ShoppingItem[];
+  categoryBudgets?: CategoryBudget[];
   [key: string]: unknown;
 }
 
@@ -83,11 +84,18 @@ export class MoneySettingsStore {
     return all[idx];
   }
 
-  /** Removes a category (and, per REQ-M012, its subcategories if it's a main category). Existing transactions referencing it are left as-is; they resolve to "Uncategorized" at read time (REQ-M015), not rewritten here. */
+  /** Removes a category (and, per REQ-M012, its subcategories if it's a main category). Existing transactions referencing it are left as-is; they resolve to "Uncategorized" at read time (REQ-M015), not rewritten here. Also removes any budget set on it (or its subcategories). */
   async deleteCategory(id: string): Promise<void> {
     const all = await this.getCategories();
-    const remaining = all.filter((c) => c.id !== id && c.parentId !== id);
+    const removedIds = new Set(all.filter((c) => c.id === id || c.parentId === id).map((c) => c.id));
+    const remaining = all.filter((c) => !removedIds.has(c.id));
     await this.saveCategories(remaining);
+
+    const budgets = await this.getCategoryBudgets();
+    const remainingBudgets = budgets.filter((b) => !removedIds.has(b.categoryId));
+    if (remainingBudgets.length !== budgets.length) {
+      await this.saveCategoryBudgets(remainingBudgets);
+    }
   }
 
   private async saveCategories(categories: Category[]): Promise<void> {
@@ -155,6 +163,18 @@ export class MoneySettingsStore {
     return list;
   }
 
+  async updateShoppingList(id: string, patch: Partial<ShoppingList>): Promise<ShoppingList> {
+    const all = await this.getShoppingLists();
+    const idx = all.findIndex((l) => l.id === id);
+    if (idx === -1) throw new Error(`Shopping list not found: ${id}`);
+    const updated: ShoppingList = { ...all[idx], ...patch, id: all[idx].id };
+    all[idx] = updated;
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.shoppingLists = all;
+    await this.adapter.save(data);
+    return updated;
+  }
+
   async deleteShoppingList(id: string): Promise<void> {
     const lists = (await this.getShoppingLists()).filter((l) => l.id !== id);
     const items = (await this.getShoppingItems()).filter((i) => i.listId !== id);
@@ -194,6 +214,37 @@ export class MoneySettingsStore {
   private async saveShoppingItems(items: ShoppingItem[]): Promise<void> {
     const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
     data.shoppingItems = items;
+    await this.adapter.save(data);
+  }
+
+  // --- Budgets ---
+
+  async getCategoryBudgets(): Promise<CategoryBudget[]> {
+    const data = (await this.adapter.load()) as LifeTrackerData | null;
+    return data?.categoryBudgets ?? [];
+  }
+
+  async setCategoryBudget(categoryId: string, monthlyLimit: number): Promise<CategoryBudget> {
+    const all = await this.getCategoryBudgets();
+    const idx = all.findIndex((b) => b.categoryId === categoryId);
+    const budget: CategoryBudget = { categoryId, monthlyLimit };
+    if (idx === -1) {
+      all.push(budget);
+    } else {
+      all[idx] = budget;
+    }
+    await this.saveCategoryBudgets(all);
+    return budget;
+  }
+
+  async removeCategoryBudget(categoryId: string): Promise<void> {
+    const all = await this.getCategoryBudgets();
+    await this.saveCategoryBudgets(all.filter((b) => b.categoryId !== categoryId));
+  }
+
+  private async saveCategoryBudgets(budgets: CategoryBudget[]): Promise<void> {
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.categoryBudgets = budgets;
     await this.adapter.save(data);
   }
 }

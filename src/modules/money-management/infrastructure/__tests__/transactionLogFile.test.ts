@@ -16,6 +16,10 @@ function makeRaw(overrides: Partial<RawTransaction> = {}): RawTransaction {
     transferPairId: '',
     recurringEntryId: '',
     shoppingItemId: '',
+    archived: '',
+    refundOf: '',
+    essential: '',
+    judgment: '',
     ...overrides,
   };
 }
@@ -32,6 +36,36 @@ describe('TransactionLogFile round-trip', () => {
     assert.equal(day[0].categoryId, 'food');
     assert.equal(day[0].amount, '-20');
     assert.equal(day[0].time, '08:15');
+    assert.equal(day[0].archived, '');
+    assert.equal(day[0].refundOf, '');
+    assert.equal(day[0].essential, '');
+    assert.equal(day[0].judgment, '');
+  });
+
+  test('essential and judgment round-trip', async () => {
+    const log = new TransactionLogFile(new FakeVaultAdapter());
+    await log.upsertTransaction(makeRaw({ id: 't1', essential: 'false', judgment: 'wasted' }));
+    await log.upsertTransaction(makeRaw({ id: 't2', essential: 'true' }));
+
+    const day = await log.readDay('2026-08-19');
+    const t1 = day.find((t) => t.id === 't1');
+    const t2 = day.find((t) => t.id === 't2');
+    assert.equal(t1?.essential, 'false');
+    assert.equal(t1?.judgment, 'wasted');
+    assert.equal(t2?.essential, 'true');
+    assert.equal(t2?.judgment, '');
+  });
+
+  test('updateFields patches arbitrary fields in place (e.g. editing Essential/Judgment after the fact)', async () => {
+    const log = new TransactionLogFile(new FakeVaultAdapter());
+    await log.upsertTransaction(makeRaw({ id: 't1' }));
+    await log.upsertTransaction(makeRaw({ id: 't2' }));
+
+    await log.updateFields('2026-08-19', 't1', { essential: 'true' });
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.find((t) => t.id === 't1')?.essential, 'true');
+    assert.equal(day.find((t) => t.id === 't2')?.essential, '');
   });
 
   test('recurringEntryId and shoppingItemId round-trip (REQ-M035/M023 traceability)', async () => {
@@ -42,6 +76,28 @@ describe('TransactionLogFile round-trip', () => {
     const day = await log.readDay('2026-08-19');
     assert.equal(day.find((t) => t.id === 't1')?.recurringEntryId, 'rec1');
     assert.equal(day.find((t) => t.id === 't2')?.shoppingItemId, 'item1');
+  });
+
+  test('archived and refundOf round-trip', async () => {
+    const log = new TransactionLogFile(new FakeVaultAdapter());
+    await log.upsertTransaction(makeRaw({ id: 't1', archived: 'true' }));
+    await log.upsertTransaction(makeRaw({ id: 't2', refundOf: 't1' }));
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.find((t) => t.id === 't1')?.archived, 'true');
+    assert.equal(day.find((t) => t.id === 't2')?.refundOf, 't1');
+  });
+
+  test('setArchived flips the flag on one transaction without disturbing others', async () => {
+    const log = new TransactionLogFile(new FakeVaultAdapter());
+    await log.upsertTransaction(makeRaw({ id: 't1' }));
+    await log.upsertTransaction(makeRaw({ id: 't2' }));
+
+    await log.setArchived('2026-08-19', 't1', true);
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.find((t) => t.id === 't1')?.archived, 'true');
+    assert.equal(day.find((t) => t.id === 't2')?.archived, '');
   });
 
   test('optional name/note round-trip as separate fields, and are absent when not provided', async () => {
@@ -127,7 +183,7 @@ describe('TransactionLogFile round-trip', () => {
     const log = new TransactionLogFile(adapter);
     await log.upsertTransaction(makeRaw());
     const raw = await adapter.readFile('Life Tracker/Logs/Money/transactions-2026.md');
-    assert.equal(raw, '- 2026-08-19 [tx-t1:: a1|expense|food|-20|||||08:15]\n');
+    assert.equal(raw, '- 2026-08-19 [tx-t1:: a1|expense|food|-20|||||08:15||||]\n');
   });
 
   test('a corrupted/unreadable file surfaces a typed error rather than silently returning empty data', async () => {
@@ -142,7 +198,7 @@ describe('TransactionLogFile round-trip', () => {
 });
 
 describe('TransactionLogFile — legacy format backward compatibility', () => {
-  test('reads a pre-existing 6-field line (from before time/recurringEntryId/shoppingItemId were added) without throwing', async () => {
+  test('reads a pre-existing 6-field line without throwing', async () => {
     const adapter = new FakeVaultAdapter();
     await adapter.createFolder('Life Tracker/Logs/Money');
     await adapter.writeFile(
@@ -156,9 +212,43 @@ describe('TransactionLogFile — legacy format backward compatibility', () => {
     assert.equal(day[0].accountId, 'NSIcRH');
     assert.equal(day[0].type, 'income');
     assert.equal(day[0].amount, '200');
-    assert.equal(day[0].recurringEntryId, '');
-    assert.equal(day[0].shoppingItemId, '');
     assert.equal(day[0].time, '00:00');
+    assert.equal(day[0].archived, '');
+    assert.equal(day[0].refundOf, '');
+    assert.equal(day[0].essential, '');
+    assert.equal(day[0].judgment, '');
+  });
+
+  test('reads a pre-existing 9-field line (from before archived/refundOf/essential/judgment were added) without throwing', async () => {
+    const adapter = new FakeVaultAdapter();
+    await adapter.createFolder('Life Tracker/Logs/Money');
+    await adapter.writeFile(
+      'Life Tracker/Logs/Money/transactions-2026.md',
+      '- 2026-08-19 [tx-mid1:: NSIcRH|expense|food|-20||||08:15]\n'
+    );
+    const log = new TransactionLogFile(adapter);
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.length, 1);
+    assert.equal(day[0].time, '08:15');
+    assert.equal(day[0].essential, '');
+    assert.equal(day[0].judgment, '');
+  });
+
+  test('reads a pre-existing 11-field line (from before essential/judgment were added) without throwing', async () => {
+    const adapter = new FakeVaultAdapter();
+    await adapter.createFolder('Life Tracker/Logs/Money');
+    await adapter.writeFile(
+      'Life Tracker/Logs/Money/transactions-2026.md',
+      '- 2026-08-19 [tx-mid2:: NSIcRH|expense|food|-20||||08:15||]\n'
+    );
+    const log = new TransactionLogFile(adapter);
+
+    const day = await log.readDay('2026-08-19');
+    assert.equal(day.length, 1);
+    assert.equal(day[0].archived, '');
+    assert.equal(day[0].essential, '');
+    assert.equal(day[0].judgment, '');
   });
 
   test('readAll and balance-relevant reads still succeed when a legacy line sits alongside current-format lines', async () => {
@@ -167,7 +257,7 @@ describe('TransactionLogFile — legacy format backward compatibility', () => {
     await adapter.writeFile(
       'Life Tracker/Logs/Money/transactions-2026.md',
       '- 2026-08-19 [tx-legacy1:: NSIcRH|income||200||]\n' +
-        '- 2026-08-20 [tx-new1:: NSIcRH|expense|food|-20||||08:15]\n'
+        '- 2026-08-20 [tx-new1:: NSIcRH|expense|food|-20||||08:15||||]\n'
     );
     const log = new TransactionLogFile(adapter);
 
@@ -190,12 +280,12 @@ describe('TransactionLogFile — legacy format backward compatibility', () => {
     assert.equal(day.length, 2);
   });
 
-  test('a truly malformed entry (more than 9 fields) is skipped, not thrown, so it does not take the rest of the day down with it', async () => {
+  test('a truly malformed entry (more than 13 fields) is skipped, not thrown, so it does not take the rest of the day down with it', async () => {
     const adapter = new FakeVaultAdapter();
     await adapter.createFolder('Life Tracker/Logs/Money');
     await adapter.writeFile(
       'Life Tracker/Logs/Money/transactions-2026.md',
-      '- 2026-08-19 [tx-bad:: a|b|c|d|e|f|g|h|i|j|k] [tx-good:: a1|expense|food|-20||||08:15]\n'
+      '- 2026-08-19 [tx-bad:: a|b|c|d|e|f|g|h|i|j|k|l|m|n] [tx-good:: a1|expense|food|-20||||08:15||||]\n'
     );
     const log = new TransactionLogFile(adapter);
 

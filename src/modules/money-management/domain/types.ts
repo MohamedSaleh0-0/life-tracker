@@ -1,5 +1,14 @@
 // Domain types for Money Management. Pure data shapes only — no I/O,
 // no Obsidian API, no React. See design-money-management.md.
+//
+// Update: Transaction gained `archived` (organizational — hidden from
+// the default view but still counts toward balances) and
+// `refundOfTransactionId` (traceability for refunds, which are new
+// transactions, never edits of the original). Also new: CategoryBudget
+// — an optional monthly spending cap per category, checked before an
+// expense transaction (or a shopping-item purchase, which creates one)
+// is recorded, so overspending triggers a warning instead of silently
+// going through.
 
 export interface Account {
   id: string;
@@ -52,6 +61,21 @@ export interface Transaction {
   recurringEntryId?: string;
   /** Traceability back to the shopping item this purchase was logged from (REQ-M023). Absent otherwise. */
   shoppingItemId?: string;
+  /** Organizational only — hidden from the default transaction list but still counted in balances. Distinct from delete. */
+  archived?: boolean;
+  /** Set on a refund transaction — points back at the original transaction it reverses. Absent on every other transaction, including the original that was refunded. */
+  refundOfTransactionId?: string;
+  /**
+   * Whether this expense was essential. Optional at the type level
+   * specifically so old entries logged before this field existed read
+   * back as "not set" rather than erroring or silently defaulting to
+   * a value — the entry FORMS require picking one for new/edited
+   * transactions, but the data model itself stays permissive for
+   * backward compatibility.
+   */
+  essential?: boolean;
+  /** Only meaningful (and only ever set) when essential === false. Ordered best to worst: wise, fair, childish, wasted. */
+  judgment?: TransactionJudgment;
 }
 
 /** Input for expense/income/adjustment — transfers go through recordTransfer() instead, since they always produce two linked rows. */
@@ -67,6 +91,9 @@ export interface NewTransactionInput {
   note?: string;
   recurringEntryId?: string;
   shoppingItemId?: string;
+  /** Only meaningful for expense transactions — captured in the entry form when type === 'expense'. */
+  essential?: boolean;
+  judgment?: TransactionJudgment;
 }
 
 export interface NewTransferInput {
@@ -80,7 +107,7 @@ export interface NewTransferInput {
 
 export interface ExchangeRates {
   primaryCurrency: string;
-  /** 1 unit of that currency key = N units of primaryCurrency. */
+  /** 1 unit of that currency key = N units of primaryCurrency. Every currency the user adds is configured relative to this one primary currency (defaults USD) — never hardcoded to any specific pair. */
   ratesToPrimary: Record<string, number>;
 }
 
@@ -168,4 +195,36 @@ export interface MarkItemBoughtInput {
   accountId: string;
   date: string;
   time?: string;
+  essential?: boolean;
+  judgment?: TransactionJudgment;
 }
+
+// --- Budgets ---
+
+/** A monthly spending cap on one category (main or sub) — resets every calendar month. Checked before an expense transaction against this category is recorded, so overspending prompts a warning rather than going through silently. */
+export interface CategoryBudget {
+  categoryId: string;
+  monthlyLimit: number;
+}
+
+export interface BudgetCheckResult {
+  categoryId: string;
+  monthlyLimit: number;
+  /** Already-spent amount in the category this calendar month, before this transaction. */
+  currentSpend: number;
+  /** currentSpend + the amount this transaction would add. */
+  projectedSpend: number;
+  exceeded: boolean;
+}
+
+// --- Essential flag + Judgment rating ---
+
+/** Ordered best to worst — only meaningful when a transaction is NOT essential. */
+export type TransactionJudgment = 'wise' | 'fair' | 'childish' | 'wasted';
+
+export const JUDGMENT_OPTIONS: { value: TransactionJudgment; label: string }[] = [
+  { value: 'wise', label: 'Wise' },
+  { value: 'fair', label: 'Fair' },
+  { value: 'childish', label: 'Childish' },
+  { value: 'wasted', label: 'Wasted Money' },
+];

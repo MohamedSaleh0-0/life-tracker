@@ -4,11 +4,13 @@
 //
 // Step components are declared once at module scope and read/write
 // shared wizard state via WizardContext, rather than being recreated
-// as inline closures on every render (the earlier version's approach —
-// harmless functionally, but meant every keystroke created a brand new
-// "component", and each step reported validity by calling a setState
-// setter directly during another component's render pass instead of
-// from an effect). See StepWizard.tsx for the fuller explanation.
+// as inline closures on every render. See StepWizard.tsx for the
+// fuller explanation.
+//
+// Update: a third habit type, 'levels' — user-defined discrete values
+// (e.g. "Routine A" / "Routine B" / "Routine C") instead of yes/no or
+// a number. The type step now includes an inline level-list editor
+// (add/remove/reorder, at least 2 required) when 'levels' is chosen.
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -16,7 +18,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { StepWizard, WizardStep, WizardStepProps } from '../../../shared/ui-kit/StepWizard';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { HabitService, NewHabitInput } from '../application/habitService';
-import { HabitDefinition, HabitSchedule, WeekStartsOn } from '../domain/types';
+import { HabitDefinition, HabitLevel, HabitSchedule, WeekStartsOn } from '../domain/types';
 import { weekStartInternalIndex } from '../domain/scheduleEvaluator';
 
 function describeSchedule(schedule: HabitSchedule): string {
@@ -28,6 +30,10 @@ function describeSchedule(schedule: HabitSchedule): string {
     case 'weeklyQuota':
       return `${schedule.timesPerWeek}x per week`;
   }
+}
+
+function makeLevelId(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
 // Fixed internal order (Monday=0..Sunday=6), matching scheduleEvaluator.ts.
@@ -42,10 +48,6 @@ function WeekdayPicker({
   onChange: (days: number[]) => void;
   weekStartsOn: WeekStartsOn;
 }) {
-  // Internal indices are fixed regardless of weekStartsOn — only the
-  // *display order* rotates to start from the user's chosen week-start
-  // day (REQ-C017's acceptance criterion: "weekday picker order...
-  // shift consistently").
   const rotation = weekStartInternalIndex(weekStartsOn);
   const displayOrder = Array.from({ length: 7 }, (_, i) => (i + rotation) % 7);
 
@@ -69,10 +71,59 @@ function WeekdayPicker({
   );
 }
 
+/** Add/remove/reorder editor for a 'levels' habit's discrete values, e.g. "Routine A" / "Routine B" / "Routine C". */
+function LevelListEditor({ levels, onChange }: { levels: HabitLevel[]; onChange: (levels: HabitLevel[]) => void }) {
+  const updateLabel = (id: string, label: string) => {
+    onChange(levels.map((l) => (l.id === id ? { ...l, label } : l)));
+  };
+
+  const remove = (id: string) => {
+    onChange(levels.filter((l) => l.id !== id).map((l, i) => ({ ...l, order: i })));
+  };
+
+  const move = (id: string, delta: number) => {
+    const idx = levels.findIndex((l) => l.id === id);
+    const target = idx + delta;
+    if (target < 0 || target >= levels.length) return;
+    const reordered = [...levels];
+    [reordered[idx], reordered[target]] = [reordered[target], reordered[idx]];
+    onChange(reordered.map((l, i) => ({ ...l, order: i })));
+  };
+
+  const add = () => {
+    onChange([...levels, { id: makeLevelId(), label: '', order: levels.length }]);
+  };
+
+  return (
+    <div className="ltk-level-editor">
+      {levels.map((level, i) => (
+        <div key={level.id} className="ltk-level-editor__row">
+          <span className="ltk-level-editor__index">{i + 1}</span>
+          <input
+            value={level.label}
+            onChange={(e) => updateLabel(level.id, e.target.value)}
+            placeholder={`Level ${i + 1} name, e.g. "Routine A"`}
+          />
+          <button type="button" onClick={() => move(level.id, -1)} disabled={i === 0} aria-label="Move up">
+            ↑
+          </button>
+          <button type="button" onClick={() => move(level.id, 1)} disabled={i === levels.length - 1} aria-label="Move down">
+            ↓
+          </button>
+          <button type="button" onClick={() => remove(level.id)} aria-label="Remove level">
+            ✕
+          </button>
+        </div>
+      ))}
+      <button type="button" className="ltk-level-editor__add" onClick={add}>
+        + Add level
+      </button>
+      {levels.length < 2 && <p className="ltk-empty">At least 2 levels are needed.</p>}
+    </div>
+  );
+}
+
 // ---- Shared wizard state ---------------------------------------------
-// A small React Context rather than prop-drilling: StepWizard's contract
-// fixes each step component's props to just { onValidChange }, so the
-// step components pull their shared state from context instead.
 
 interface WizardCtx {
   name: string;
@@ -87,6 +138,8 @@ interface WizardCtx {
   setTargetValue: (v: string) => void;
   targetUnit: string;
   setTargetUnit: (v: string) => void;
+  levels: HabitLevel[];
+  setLevels: (v: HabitLevel[]) => void;
   schedule: HabitSchedule;
   setSchedule: (v: HabitSchedule) => void;
   weekStartsOn: WeekStartsOn;
@@ -128,11 +181,25 @@ function NameStep({ onValidChange }: WizardStepProps) {
 }
 
 function TypeStep({ onValidChange }: WizardStepProps) {
-  const { type, setType, targetValue, setTargetValue, targetUnit, setTargetUnit } = useWizardCtx();
+  const { type, setType, targetValue, setTargetValue, targetUnit, setTargetUnit, levels, setLevels } = useWizardCtx();
 
   useEffect(() => {
-    onValidChange(true); // target/unit are optional even for numeric — always valid
-  }, [onValidChange]);
+    if (type === 'levels') {
+      onValidChange(levels.length >= 2 && levels.every((l) => l.label.trim().length > 0));
+    } else {
+      onValidChange(true); // target/unit are optional even for numeric — always valid
+    }
+  }, [type, levels, onValidChange]);
+
+  const switchToLevels = () => {
+    setType('levels');
+    if (levels.length === 0) {
+      setLevels([
+        { id: makeLevelId(), label: '', order: 0 },
+        { id: makeLevelId(), label: '', order: 1 },
+      ]);
+    }
+  };
 
   return (
     <div className="ltk-wizard-step">
@@ -143,6 +210,10 @@ function TypeStep({ onValidChange }: WizardStepProps) {
       <label>
         <input type="radio" checked={type === 'numeric'} onChange={() => setType('numeric')} />
         Numeric
+      </label>
+      <label>
+        <input type="radio" checked={type === 'levels'} onChange={switchToLevels} />
+        Custom levels (pick one of several named options each day)
       </label>
       {type === 'numeric' && (
         <div className="ltk-wizard-step__target">
@@ -159,6 +230,15 @@ function TypeStep({ onValidChange }: WizardStepProps) {
             Unit
             <input value={targetUnit} onChange={(e) => setTargetUnit(e.target.value)} placeholder="steps" />
           </label>
+        </div>
+      )}
+      {type === 'levels' && (
+        <div className="ltk-wizard-step__target">
+          <p className="ltk-empty">
+            e.g. "Exercise": Routine A / Routine B / Routine C — logging any one of them counts the day as done;
+            which one you picked is what gets tracked.
+          </p>
+          <LevelListEditor levels={levels} onChange={setLevels} />
         </div>
       )}
     </div>
@@ -215,7 +295,7 @@ function ScheduleStep({ onValidChange }: WizardStepProps) {
 }
 
 function ReviewStep({ onValidChange }: WizardStepProps) {
-  const { icon, name, type, targetValue, targetUnit, schedule } = useWizardCtx();
+  const { icon, name, type, targetValue, targetUnit, levels, schedule } = useWizardCtx();
 
   useEffect(() => {
     onValidChange(true);
@@ -226,11 +306,14 @@ function ReviewStep({ onValidChange }: WizardStepProps) {
       <p>
         {icon} <strong>{name}</strong>
       </p>
-      <p>Type: {type === 'boolean' ? 'Yes/No' : 'Numeric'}</p>
+      <p>Type: {type === 'boolean' ? 'Yes/No' : type === 'numeric' ? 'Numeric' : 'Custom levels'}</p>
       {type === 'numeric' && targetValue && (
         <p>
           Target: {targetValue} {targetUnit}
         </p>
+      )}
+      {type === 'levels' && (
+        <p>Levels: {levels.map((l) => l.label).filter(Boolean).join(', ')}</p>
       )}
       <p>Schedule: {describeSchedule(schedule)}</p>
     </div>
@@ -249,10 +332,8 @@ const WIZARD_STEPS: WizardStep[] = [
 interface HabitWizardFormProps {
   habitService: HabitService;
   existingHabit?: HabitDefinition; // present when editing, REQ-H014
-  weekStartsOn: WeekStartsOn; // see tasks.md Notes — sourced from a placeholder until the cross-cutting shell exists
-  /** Backing out via Cancel/Back-at-step-0 — nothing was saved. */
+  weekStartsOn: WeekStartsOn;
   onCancel: () => void;
-  /** A create/update actually completed successfully. */
   onSaved: () => void;
 }
 
@@ -265,6 +346,7 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
     existingHabit?.target ? String(existingHabit.target.value) : ''
   );
   const [targetUnit, setTargetUnit] = useState(existingHabit?.target?.unit ?? '');
+  const [levels, setLevels] = useState<HabitLevel[]>(existingHabit?.levels ?? []);
   const [schedule, setSchedule] = useState<HabitSchedule>(existingHabit?.schedule ?? { mode: 'daily' });
 
   const ctx: WizardCtx = {
@@ -280,6 +362,8 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
     setTargetValue,
     targetUnit,
     setTargetUnit,
+    levels,
+    setLevels,
     schedule,
     setSchedule,
     weekStartsOn,
@@ -293,6 +377,7 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
       color,
       schedule,
       target: type === 'numeric' && targetValue ? { value: Number(targetValue), unit: targetUnit } : undefined,
+      levels: type === 'levels' ? levels.map((l, i) => ({ ...l, label: l.label.trim(), order: i })) : undefined,
     };
 
     if (existingHabit) {
@@ -324,15 +409,12 @@ export class HabitWizardModal extends Modal {
     private habitService: HabitService,
     private weekStartsOn: WeekStartsOn,
     private existingHabit?: HabitDefinition,
-    /** Called after a successful create/update, before the modal closes — lets a host view (e.g. the dashboard) refresh. */
     private onSaved?: () => void
   ) {
     super(app);
   }
 
   onOpen(): void {
-    // Was never set before — an omission unrelated to the blank-body
-    // bug, but worth fixing while we're in here (empty modal title bar).
     this.titleEl.setText(this.existingHabit ? 'Edit habit' : 'New habit');
 
     this.root = createRoot(this.contentEl);

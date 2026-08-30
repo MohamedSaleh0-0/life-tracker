@@ -28,20 +28,6 @@ import { TransactionEntryModal } from './src/modules/money-management/ui/Transac
 import { MoneyTrackerView, VIEW_TYPE_MONEY_TRACKER } from './src/modules/money-management/ui/MoneyTrackerView';
 
 // Composition root (see PROJECT_PRINCIPLES.md §Conventions).
-//
-// STATUS:
-// - Habit Tracking: feature-complete per its requirements doc.
-// - Data Point Tracking: feature-complete per its requirements doc.
-// - Money Management: accounts, categories, all four transaction types
-//   (with time-of-day, not just date), balance/net-worth math with
-//   manual currency conversion, undo-last-transaction, recurring
-//   entries (REQ-M018-M020/M035), and shopping lists incl. the
-//   auto-transaction-on-purchase flow (REQ-M021-M025/M034). The finance
-//   dashboard's charts (REQ-M026-M033) and satisfaction tracking
-//   (REQ-M016/M017) are still not built — see design-money-management.md.
-// - Settings: ONE registered PluginSettingTab (LifeTrackerSettingsTab)
-//   with in-page section navigation, replacing three separate
-//   per-module tabs that were indistinguishable in Obsidian's sidebar.
 export default class LifeTrackerPlugin extends Plugin {
   habitService!: HabitService;
   dataPointService!: DataPointService;
@@ -102,7 +88,7 @@ export default class LifeTrackerPlugin extends Plugin {
     // --- Views ---
     this.registerView(
       VIEW_TYPE_HABIT_TRACKER,
-      (leaf: WorkspaceLeaf) => new HabitTrackerView(leaf, this.habitService, this.weekStartsOn)
+      (leaf: WorkspaceLeaf) => new HabitTrackerView(leaf, this.habitService, this.weekStartsOn, this.pluginSettingsStore)
     );
     this.registerView(
       VIEW_TYPE_DATA_POINT_TRACKER,
@@ -164,13 +150,6 @@ export default class LifeTrackerPlugin extends Plugin {
         new Notice(undone ? 'Undid last transaction.' : 'Nothing to undo this session.');
       },
     });
-
-    // TODO(cross-cutting shell): once module enable/disable (REQ-C004)
-    // exists, each module's view registration + ribbon icon should be
-    // conditional on that module being enabled. Also still missing:
-    // the all-module "Today" view (REQ-C001) — these are each module's
-    // own per-module view only, per REQ-C002's "dedicated per-module
-    // views... separate from the Today view."
   }
 
   /** Opens the given view type in an existing leaf if one's already open, otherwise creates one. */

@@ -1,28 +1,16 @@
 // Reads/writes the yearly markdown log files for Money Management
-// (REQ-C009/C010, per-entry like Data Point Tracking since multiple
-// transactions per day are the norm, not the exception). See
-// design-money-management.md's Data Model section for the exact
-// format and why `tx-`/`txn-`/`txnote-` are unambiguous prefixes.
+// (REQ-C009/C010, per-entry since multiple transactions per day are
+// the norm). See design-money-management.md's Data Model section for
+// the original field layout and why `tx-`/`txn-`/`txnote-` prefixes
+// are unambiguous.
 //
-// Main field is nine pipe-delimited structured parts (none can contain
-// `|`, so a plain split is always safe): account, type, category,
-// amount, quantity, transferPairId, recurringEntryId, shoppingItemId,
-// time. Time and the two traceability ids were added after the format
-// first shipped; empty slots serialize as ''.
-//
-// Bug fix: transactions written by the plugin *before* that field-count
-// grew from 6 to 9 are still sitting in real vaults' log files. The
-// parser used to require an exact 9-field match and threw
-// "Malformed transaction log entry" on anything else — which crashed
-// the entire read (readAll/readDay/readRange, and therefore every
-// balance calculation and every new upsertTransaction, since upsert
-// also reads the day first to merge) the moment a single legacy line
-// was present anywhere in the vault. One old line was enough to make
-// the whole Money view look permanently broken. parseMain now
-// backfills missing trailing fields with safe defaults instead of
-// refusing to load, and the per-line parse is wrapped so a genuinely
-// unparseable entry is skipped rather than taking the whole file down
-// with it.
+// Main field grew again this pass: 11 -> 13 pipe-delimited parts, to
+// add `essential` ('true'/'false'/'' for not-set) and `judgment`
+// ('wise'/'fair'/'childish'/'wasted'/'' for not-set). Same backward-
+// compatibility approach as every prior growth of this format:
+// parseMain backfills any missing trailing fields with '', so entries
+// logged before these fields existed read back as "not set" rather
+// than erroring.
 
 import { VaultAdapter } from '../../../core/ports/vaultAdapter';
 
@@ -44,6 +32,10 @@ export interface RawTransaction {
   transferPairId: string; // '' = none
   recurringEntryId: string; // '' = none
   shoppingItemId: string; // '' = none
+  archived: string; // 'true' or '' (false)
+  refundOf: string; // '' = not a refund, else the original transaction's id
+  essential: string; // 'true' / 'false' / '' (not set)
+  judgment: string; // 'wise' / 'fair' / 'childish' / 'wasted' / '' (not set)
   name?: string;
   note?: string;
 }
@@ -53,7 +45,7 @@ const MAIN_RE = /\[tx-([a-zA-Z0-9_-]+)::\s*([^\]]+)\]/g;
 const NAME_RE = /\[txn-([a-zA-Z0-9_-]+)::\s*([^\]]+)\]/g;
 const NOTE_RE = /\[txnote-([a-zA-Z0-9_-]+)::\s*([^\]]+)\]/g;
 
-const MAIN_FIELD_COUNT = 9;
+const MAIN_FIELD_COUNT = 13;
 
 function serializeMain(t: RawTransaction): string {
   return [
@@ -66,6 +58,10 @@ function serializeMain(t: RawTransaction): string {
     t.recurringEntryId,
     t.shoppingItemId,
     t.time,
+    t.archived,
+    t.refundOf,
+    t.essential,
+    t.judgment,
   ].join('|');
 }
 
@@ -76,15 +72,24 @@ function parseMain(raw: string): Omit<RawTransaction, 'id' | 'date' | 'name' | '
     throw new Error(`Malformed transaction log entry: "${raw}"`);
   }
   if (parts.length < MAIN_FIELD_COUNT) {
-    // Legacy line from before this format grew to 9 fields (see the
-    // header comment) — backfill the missing trailing fields with safe
-    // empty defaults rather than refusing to load the whole file over
-    // one old entry.
     parts = [...parts, ...new Array(MAIN_FIELD_COUNT - parts.length).fill('')];
   }
 
-  const [accountId, type, categoryId, amount, quantity, transferPairId, recurringEntryId, shoppingItemId, time] =
-    parts;
+  const [
+    accountId,
+    type,
+    categoryId,
+    amount,
+    quantity,
+    transferPairId,
+    recurringEntryId,
+    shoppingItemId,
+    time,
+    archived,
+    refundOf,
+    essential,
+    judgment,
+  ] = parts;
   return {
     accountId,
     type,
@@ -95,6 +100,10 @@ function parseMain(raw: string): Omit<RawTransaction, 'id' | 'date' | 'name' | '
     recurringEntryId,
     shoppingItemId,
     time: time || '00:00',
+    archived: archived || '',
+    refundOf: refundOf || '',
+    essential: essential || '',
+    judgment: judgment || '',
   };
 }
 
@@ -168,10 +177,6 @@ export class TransactionLogFile {
             note: notes.get(id),
           });
         } catch {
-          // A genuinely corrupted single entry (more than 9 fields) is
-          // skipped rather than taking the whole day/file down with it
-          // — "fail safely" per PROJECT_PRINCIPLES, not "fail loudly
-          // and lose everything else on the page."
           continue;
         }
       }
@@ -225,7 +230,7 @@ export class TransactionLogFile {
     return result;
   }
 
-  /** All transactions ever logged — used for balance calculation (REQ-M004/M007), which is always over full history, not a range. */
+  /** All transactions ever logged — used for balance calculation (REQ-M004/M007), which is always over full history (including archived), not a range. */
   async readAll(): Promise<RawTransaction[]> {
     const files = await this.adapter.listFilesUnder(this.logFolder);
     const result: RawTransaction[] = [];
@@ -253,5 +258,28 @@ export class TransactionLogFile {
     const existing = days.get(date) ?? [];
     days.set(date, existing.filter((e) => e.id !== id));
     await this.writeYearFile(year, days);
+  }
+
+  /** Flips the archived flag on one transaction in place — organizational only, balances are unaffected. */
+  async setArchived(date: string, id: string, archived: boolean): Promise<void> {
+    await this.updateFields(date, id, { archived: archived ? 'true' : '' });
+  }
+
+  /** Generic in-place field patch for one transaction (e.g. Essential/Judgment edits after the fact) — merges `patch` into the existing raw entry and rewrites just that day's line. */
+  async updateFields(date: string, id: string, patch: Partial<RawTransaction>): Promise<void> {
+    const year = yearOf(date);
+    const days = await this.readYearFile(year);
+    const existing = days.get(date) ?? [];
+    const idx = existing.findIndex((e) => e.id === id);
+    if (idx === -1) throw new Error(`Transaction not found: ${id} on ${date}`);
+    existing[idx] = { ...existing[idx], ...patch };
+    days.set(date, existing);
+    await this.writeYearFile(year, days);
+  }
+
+  /** Looks up a single transaction by date+id, for building a refund off it. */
+  async findTransaction(date: string, id: string): Promise<RawTransaction | undefined> {
+    const day = await this.readDay(date);
+    return day.find((t) => t.id === id);
   }
 }

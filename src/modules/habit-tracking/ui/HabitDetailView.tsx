@@ -8,14 +8,11 @@
 // done/missed/not-scheduled palette, plus a trend line chart and
 // average/best insights.
 //
-// Completion semantics update: a numeric habit with a target now only
-// classifies a day as "done" once the value reaches target (see
-// domain/completion.ts) — a day logged below target classifies as
-// "missed" for streak purposes. The heatmap spectrum is a separate,
-// purely visual concern from that streak math, so it still colors any
-// day with a numeric value logged (regardless of status), rather than
-// only "done" days — otherwise a habit logged consistently at 80% of
-// target would look identical to never having logged it at all.
+// Update: passes `statusLabels` through to CalendarHeatmap so hovering
+// a boolean-habit day shows "Done"/"Missed"/"Not scheduled" in the
+// tooltip — previously boolean days carried no `label` at all, so the
+// (now-fixed) hover tooltip fell back to showing only the bare date
+// with no indication of what happened that day.
 
 import React, { useEffect, useState } from 'react';
 import { App } from 'obsidian';
@@ -52,6 +49,12 @@ const STATUS_COLORS: Record<string, string> = {
   done: 'var(--color-green, #22c55e)',
   missed: 'var(--color-red, #ef4444)',
   'not-scheduled': 'var(--background-modifier-border)',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  done: 'Done',
+  missed: 'Missed',
+  'not-scheduled': 'Not scheduled',
 };
 
 // Violet spectrum for numeric habit intensity — deliberately distinct
@@ -103,12 +106,16 @@ export function HabitDetailView({
   }, [habit.id, rangeStart, weekStartsOn, habitService]);
 
   const isNumeric = habit.type === 'numeric';
+  const isLevels = habit.type === 'levels';
 
   const numericValues = (history?.days ?? [])
     .map((d) => d.value)
     .filter((v): v is number => typeof v === 'number');
   const maxObserved = numericValues.length > 0 ? Math.max(...numericValues) : 0;
   const intensityDenom = habit.target?.value ?? maxObserved;
+
+  const levelIndexById = new Map((habit.levels ?? []).map((l, i) => [l.id, i]));
+  const levelCount = habit.levels?.length ?? 0;
 
   const heatmapDays: HeatmapDay[] = (history?.days ?? []).map((d) => {
     // Color by "was a value logged", not "status === done" — a
@@ -123,6 +130,12 @@ export function HabitDetailView({
         color: numericIntensityColor(d.value, intensityDenom),
         label: `${d.date}: ${d.value}${unit}${habit.target ? (metTarget ? ' ✓' : ' (below target)') : ''}`,
       };
+    }
+    if (isLevels && typeof d.value === 'string') {
+      const idx = levelIndexById.get(d.value);
+      const label = habit.levels?.find((l) => l.id === d.value)?.label ?? d.value;
+      const color = idx !== undefined ? numericIntensityColor(idx, Math.max(levelCount - 1, 1)) : undefined;
+      return { date: d.date, status: d.status, color, label: `${d.date}: ${label}` };
     }
     return { date: d.date, status: d.status };
   });
@@ -217,7 +230,12 @@ export function HabitDetailView({
 
       {habit.trendVisible && heatmapDays.length > 0 && (
         <>
-          <CalendarHeatmap days={heatmapDays} statusColors={STATUS_COLORS} weekStartsOn={weekStartsOn} />
+          <CalendarHeatmap
+            days={heatmapDays}
+            statusColors={STATUS_COLORS}
+            statusLabels={STATUS_LABELS}
+            weekStartsOn={weekStartsOn}
+          />
           {isNumeric ? (
             <div className="ltk-heatmap-legend">
               <span>Low</span>
@@ -228,6 +246,18 @@ export function HabitDetailView({
                 }}
               />
               <span>High{habit.target ? ` (target: ${habit.target.value}${habit.target.unit ? ' ' + habit.target.unit : ''})` : ''}</span>
+            </div>
+          ) : isLevels ? (
+            <div className="ltk-heatmap-legend">
+              {(habit.levels ?? []).map((level, i) => (
+                <span key={level.id} className="ltk-heatmap-legend__level">
+                  <span
+                    className="ltk-heatmap-legend__dot"
+                    style={{ background: numericIntensityColor(i, Math.max(levelCount - 1, 1)) }}
+                  />
+                  {level.label}
+                </span>
+              ))}
             </div>
           ) : (
             <div className="ltk-heatmap-legend">

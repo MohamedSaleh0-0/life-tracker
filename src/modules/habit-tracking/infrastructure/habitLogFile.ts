@@ -1,4 +1,10 @@
 // Reads/writes the yearly markdown log files (REQ-C009/C010).
+//
+// Update: HabitLogValue now also carries a string case (a 'levels'
+// habit logs the id of the level picked that day). Serialized with an
+// explicit `level:` prefix (`[habit-abc:: level:lvl_a]`) so it's never
+// ambiguous with a numeric habit's raw number, even in the edge case
+// where a level id happens to be all-digits.
 
 import { VaultAdapter } from './vaultAdapter';
 import { HabitLogValue } from '../domain/types';
@@ -13,9 +19,11 @@ export type { HabitLogValue };
 
 const LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+(.*)$/;
 const FIELD_RE = /\[habit-([a-zA-Z0-9_-]+)::\s*([^\]]+)\]/g;
+const LEVEL_PREFIX = 'level:';
 
 function parseFieldValue(raw: string): HabitLogValue {
   const trimmed = raw.trim();
+  if (trimmed.startsWith(LEVEL_PREFIX)) return trimmed.slice(LEVEL_PREFIX.length);
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
   const num = Number(trimmed);
@@ -24,6 +32,7 @@ function parseFieldValue(raw: string): HabitLogValue {
 }
 
 function serializeFieldValue(value: HabitLogValue): string {
+  if (typeof value === 'string') return `${LEVEL_PREFIX}${value}`;
   return String(value);
 }
 
@@ -79,7 +88,13 @@ export class HabitLogFile {
       let fieldMatch: RegExpExecArray | null;
       while ((fieldMatch = FIELD_RE.exec(fieldsRaw)) !== null) {
         const [, habitId, rawValue] = fieldMatch;
-        fields.set(habitId, parseFieldValue(rawValue));
+        try {
+          fields.set(habitId, parseFieldValue(rawValue));
+        } catch {
+          // A genuinely unrecognized value is skipped rather than
+          // taking the whole day's line down with it.
+          continue;
+        }
       }
       result.set(date, fields);
     }

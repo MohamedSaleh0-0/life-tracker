@@ -1,0 +1,89 @@
+/* ---------- Round 5 additions — append to the end of styles.css, nothing above changed ---------- */
+
+/* Shopping list card: needs relative positioning + spacing now that it
+   holds an inline "+ Add item" button alongside the name/summary. */
+.ltk-shopping-list-card {
+  position: relative;
+  padding-right: 90px;
+}
+
+.ltk-shopping-list-card__add {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--interactive-accent);
+  background: transparent;
+  color: var(--interactive-accent);
+  cursor: pointer;
+}
+
+.ltk-shopping-list-card__add:hover {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Transaction row tags (refund / essential / judgment) */
+.ltk-money-tx__tag--essential {
+  color: var(--color-green, #22c55e);
+}
+
+.ltk-money-tx__tag--judgment {
+  color: var(--text-warning, #eab308);
+}
+
+/* Essential/Judgment capture (transaction entry, shopping buy, edit-tags modal) */
+.ltk-essential-judgment {
+  margin-bottom: 10px;
+}
+
+.ltk-essential-judgment__label {
+  display: block;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.ltk-essential-judgment__toggle {
+  display: flex;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  width: fit-content;
+  margin-bottom: 8px;
+}
+
+.ltk-essential-judgment__toggle button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 6px 16px;
+  border: none;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ltk-essential-judgment__toggle button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Overall commitment heatmap (main Habits view) */
+.ltk-commitment-heatmap {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ltk-commitment-heatmap h3 {
+  font-size: var(--font-ui-small);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  margin: 0 0 10px 0;
+}

@@ -1,21 +1,25 @@
-// Single-entry logging/editing form (REQ-D006/D008) — much lighter
-// than the definition wizard, since logging a value isn't a multi-step
-// flow. Same safety pattern as everything else built after the
-// StepWizard incident: no render-phase state tricks, ErrorBoundary
-// wraps the mount.
+// Single-entry logging/editing form (REQ-D006/D008).
 //
-// - Date field lets an entry be backdated (e.g. logging what sleep
-//   time was two days ago), locked while editing an existing entry —
-//   the service addresses an edit by { entryId, date }, and moving an
-//   entry between days isn't handled by editEntry yet.
+// Update: 'time' and 'duration' types now use the ClockPicker (a
+// draggable circular clock face) as the primary input, replacing the
+// old plain <input type="time"> fields — per the ask for a faster,
+// less hand-typing-heavy way to log a time-of-day or a start/end
+// span. ClockPicker still keeps a native time input under the face
+// for exact manual entry, kept in sync both directions. Duration
+// naturally supports a span crossing midnight (e.g. sleep 22:00 ->
+// 04:00) since the arc/handles wrap around the face rather than
+// needing special-casing here.
+//
+// - Date field lets an entry be backdated, locked while editing an
+//   existing entry.
 // - Duration type reuses the existing time/value fields as Start/End
-//   time rather than adding new state: `time` = activity start,
-//   `value` = activity end (validated as HH:MM, same as time type).
+//   time: `time` = activity start, `value` = activity end.
 
 import React, { useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
+import { ClockPicker } from '../../../shared/ui-kit/ClockPicker';
 import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition, DataPointEntry } from '../domain/types';
 import { getTodayLocal } from '../../../core/date';
@@ -43,6 +47,7 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
   const [submitting, setSubmitting] = useState(false);
 
   const isDuration = definition.type === 'duration';
+  const isTimeOfDay = definition.type === 'time';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,29 +80,53 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
           required
         />
       </label>
-      <label>
-        {isDuration ? 'Start time' : 'Time'}
-        <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
-      </label>
-      <label>
-        {isDuration ? 'End time' : 'Value'}
-        {definition.type === 'text' ? (
-          <textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder="What's up?" />
-        ) : definition.type === 'time' || isDuration ? (
-          <input type="time" value={value} onChange={(e) => setValue(e.target.value)} />
-        ) : (
-          <input
-            type="number"
-            step="any"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={definition.unit ? `e.g. 70 (${definition.unit})` : 'Enter a value'}
+
+      {isDuration ? (
+        <div className="ltk-clock-field">
+          <ClockPicker
+            mode="range"
+            startValue={time || '22:00'}
+            endValue={value || '06:00'}
+            onChange={(start, end) => {
+              setTime(start);
+              setValue(end);
+            }}
           />
-        )}
-      </label>
-      {isDuration && (
-        <p className="ltk-empty">An end time earlier than the start is treated as crossing midnight.</p>
+          <p className="ltk-empty">An end time earlier than the start is treated as crossing midnight.</p>
+        </div>
+      ) : isTimeOfDay ? (
+        <>
+          <div className="ltk-clock-field">
+            <ClockPicker mode="single" value={value || time || nowHHMM()} onChange={(v) => setValue(v)} />
+          </div>
+          <label>
+            Logged at (optional, defaults to now)
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+          </label>
+        </>
+      ) : (
+        <>
+          <label>
+            Time
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+          </label>
+          <label>
+            Value
+            {definition.type === 'text' ? (
+              <textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder="What's up?" />
+            ) : (
+              <input
+                type="number"
+                step="any"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder={definition.unit ? `e.g. 70 (${definition.unit})` : 'Enter a value'}
+              />
+            )}
+          </label>
+        </>
       )}
+
       {error && <p className="ltk-form-error">{error}</p>}
       <div className="ltk-entry-form__actions">
         <button type="button" onClick={onCancel} disabled={submitting}>

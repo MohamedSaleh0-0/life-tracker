@@ -1,6 +1,19 @@
-// Create/edit an account (REQ-M001) — name, currency, opening balance.
+// Create/edit an account (REQ-M001).
+//
+// Update: editing an EXISTING account now shows and edits its CURRENT
+// balance, not the historical opening balance — "opening balance" is
+// meaningless to look at once an account has real history, and users
+// expect to see/adjust what's actually in the account today. Since
+// REQ-M004 requires a balance to only ever change via a recorded
+// transaction (never by rewriting a stored number), changing this
+// field doesn't touch `openingBalance` at all — it records a single
+// balance-correction "adjustment" transaction for the difference
+// (MoneyService.setAccountCurrentBalance), exactly like the existing
+// manual "Adjustment" transaction type already supports. Creating a
+// brand-new account still asks for "Opening balance", since there's
+// no current balance yet to show.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
@@ -17,11 +30,24 @@ interface AccountFormProps {
 function AccountForm({ moneyService, existingAccount, onCancel, onSaved }: AccountFormProps) {
   const [name, setName] = useState(existingAccount?.name ?? '');
   const [currency, setCurrency] = useState(existingAccount?.currency ?? 'USD');
-  const [openingBalance, setOpeningBalance] = useState(
-    existingAccount ? String(existingAccount.openingBalance) : '0'
-  );
+  const [balanceInput, setBalanceInput] = useState(existingAccount ? '' : '0');
+  const [loadingBalance, setLoadingBalance] = useState(!!existingAccount);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!existingAccount) return;
+    let cancelled = false;
+    moneyService.getAccountBalance(existingAccount.id).then((balance) => {
+      if (!cancelled) {
+        setBalanceInput(String(balance));
+        setLoadingBalance(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [existingAccount, moneyService]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,9 +55,9 @@ function AccountForm({ moneyService, existingAccount, onCancel, onSaved }: Accou
       setError('Enter a name.');
       return;
     }
-    const parsed = Number(openingBalance);
+    const parsed = Number(balanceInput);
     if (Number.isNaN(parsed)) {
-      setError('Opening balance must be a number.');
+      setError(`${existingAccount ? 'Current' : 'Opening'} balance must be a number.`);
       return;
     }
     setSubmitting(true);
@@ -41,8 +67,11 @@ function AccountForm({ moneyService, existingAccount, onCancel, onSaved }: Accou
         await moneyService.updateAccount(existingAccount.id, {
           name: name.trim(),
           currency: currency.trim(),
-          openingBalance: parsed,
         });
+        // Never rewrites openingBalance — a balance-correction
+        // adjustment transaction is recorded for the difference
+        // instead (REQ-M004: balances change only via a transaction).
+        await moneyService.setAccountCurrentBalance(existingAccount.id, parsed);
       } else {
         await moneyService.createAccount({ name: name.trim(), currency: currency.trim(), openingBalance: parsed });
       }
@@ -65,15 +94,27 @@ function AccountForm({ moneyService, existingAccount, onCancel, onSaved }: Accou
         <input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="USD" />
       </label>
       <label>
-        Opening balance
-        <input type="number" step="any" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+        {existingAccount ? 'Current balance' : 'Opening balance'}
+        <input
+          type="number"
+          step="any"
+          value={balanceInput}
+          onChange={(e) => setBalanceInput(e.target.value)}
+          disabled={loadingBalance}
+          placeholder={loadingBalance ? 'Loading…' : undefined}
+        />
       </label>
+      {existingAccount && (
+        <p className="ltk-empty">
+          Changing this records a balance-correction transaction for the difference — it doesn't rewrite history.
+        </p>
+      )}
       {error && <p className="ltk-form-error">{error}</p>}
       <div className="ltk-entry-form__actions">
         <button type="button" onClick={onCancel} disabled={submitting}>
           Cancel
         </button>
-        <button type="submit" className="ltk-button--accent" disabled={submitting}>
+        <button type="submit" className="ltk-button--accent" disabled={submitting || loadingBalance}>
           {existingAccount ? 'Save' : 'Create'}
         </button>
       </div>

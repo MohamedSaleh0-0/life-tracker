@@ -1,15 +1,22 @@
 // Mark a pending item bought (REQ-M023) — actual price, account,
 // purchase date; creates the linked expense transaction automatically.
+//
+// This pass: same budget check + Essential/Judgment capture as the
+// manual transaction entry form (buying an item is still creating a
+// real expense transaction, so it goes through the same conventions).
 
 import React, { useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
+import { confirmAsync } from '../../../shared/ui-kit/ConfirmModal';
 import { MoneyService } from '../application/moneyService';
-import { Account, ShoppingItem } from '../domain/types';
+import { Account, ShoppingItem, TransactionJudgment } from '../domain/types';
 import { getTodayLocal } from '../../../core/date';
+import { EssentialJudgmentFields, essentialJudgmentValid } from './EssentialJudgmentFields';
 
 interface BuyFormProps {
+  app: App;
   moneyService: MoneyService;
   item: ShoppingItem;
   accounts: Account[];
@@ -17,10 +24,12 @@ interface BuyFormProps {
   onSaved: () => void;
 }
 
-function BuyForm({ moneyService, item, accounts, onCancel, onSaved }: BuyFormProps) {
+function BuyForm({ app, moneyService, item, accounts, onCancel, onSaved }: BuyFormProps) {
   const [actualPrice, setActualPrice] = useState(item.estimatedPrice !== undefined ? String(item.estimatedPrice) : '');
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
   const [date, setDate] = useState(getTodayLocal());
+  const [essential, setEssential] = useState<boolean | undefined>(undefined);
+  const [judgment, setJudgment] = useState<TransactionJudgment | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,10 +44,32 @@ function BuyForm({ moneyService, item, accounts, onCancel, onSaved }: BuyFormPro
       setError('Choose an account.');
       return;
     }
+    if (!essentialJudgmentValid(essential, judgment)) {
+      setError(essential === undefined ? 'Choose whether this was essential.' : 'Choose a judgment rating.');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await moneyService.markShoppingItemBought(item.id, { actualPrice: parsed, accountId, date });
+      const budgetCheck = await moneyService.checkBudget(item.categoryId, parsed, date);
+      if (budgetCheck?.exceeded) {
+        const proceed = await confirmAsync(
+          app,
+          'Budget exceeded',
+          `This category's budget is ${budgetCheck.monthlyLimit.toFixed(2)}/month. You've already spent ${budgetCheck.currentSpend.toFixed(2)} this month — buying this would bring it to ${budgetCheck.projectedSpend.toFixed(2)}. Buy it anyway?`
+        );
+        if (!proceed) {
+          setSubmitting(false);
+          return;
+        }
+      }
+      await moneyService.markShoppingItemBought(item.id, {
+        actualPrice: parsed,
+        accountId,
+        date,
+        essential,
+        judgment: essential === false ? judgment : undefined,
+      });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -71,6 +102,15 @@ function BuyForm({ moneyService, item, accounts, onCancel, onSaved }: BuyFormPro
         Date
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
       </label>
+      <EssentialJudgmentFields
+        essential={essential}
+        onEssentialChange={(v) => {
+          setEssential(v);
+          if (v) setJudgment(undefined);
+        }}
+        judgment={judgment}
+        onJudgmentChange={setJudgment}
+      />
       {error && <p className="ltk-form-error">{error}</p>}
       <div className="ltk-entry-form__actions">
         <button type="button" onClick={onCancel} disabled={submitting}>
@@ -103,6 +143,7 @@ export class ShoppingItemBuyModal extends Modal {
     this.root.render(
       <ErrorBoundary>
         <BuyForm
+          app={this.app}
           moneyService={this.moneyService}
           item={this.item}
           accounts={this.accounts}

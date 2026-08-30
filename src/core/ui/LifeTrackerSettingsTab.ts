@@ -1,18 +1,19 @@
 // ONE settings tab for the whole plugin, with in-page section
-// navigation — replaces the previous approach of registering three
-// separate PluginSettingTabs (one per module), which made Obsidian's
-// settings sidebar show three indistinguishable "Life Tracker" entries
-// with no way to tell them apart (each addSettingTab() call becomes
-// its own top-level nav item, and none of them had a name to
-// disambiguate). This is the cross-cutting settings shell that's been
-// flagged as a to-do since the very first Habit Tracking pass.
+// navigation.
 //
-// Also fixes the "every change scrolls back to the top" complaint:
-// every mutation still calls this.display() to redraw (simplest way to
-// reflect new state with Obsidian's imperative Setting API), but
-// display() now captures containerEl.scrollTop before emptying and
-// restores it after rebuilding, so editing something near the bottom
-// of a long section doesn't punt you back to the top.
+// This pass:
+//  - Accounts get an "Archive" action (the `archived` field already
+//    existed on Account and drove list filtering everywhere, but there
+//    was previously no UI to actually set it — an account could be
+//    created and edited but never retired).
+//  - Categories get a "Rename" action alongside the existing "+ Sub"
+//    and "Delete" (renameCategory already existed in the service layer
+//    but had no UI hookup at all).
+//  - Currency conversion section's copy is unchanged in behavior — it
+//    was already generic (any currency's rate is entered relative to
+//    whatever the primary currency is, defaulting to USD, not
+//    hardcoded to any one pair) — but the description text is
+//    clarified so that's obvious at a glance.
 
 import { App, PluginSettingTab, Plugin, Setting } from 'obsidian';
 import { PluginSettingsStore } from '../pluginSettingsStore';
@@ -27,6 +28,7 @@ import { AccountModal } from '../../modules/money-management/ui/AccountModal';
 import { CategoryModal } from '../../modules/money-management/ui/CategoryModal';
 import { RecurringEntryModal } from '../../modules/money-management/ui/RecurringEntryModal';
 import { ConfirmModal } from '../../shared/ui-kit/ConfirmModal';
+import { RenameModal } from '../../shared/ui-kit/RenameModal';
 
 type Section = 'general' | 'habits' | 'dataPoints' | 'money';
 
@@ -66,7 +68,7 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
         await this.renderGeneralSection(body);
         break;
       case 'habits':
-        this.renderHabitsSection(body);
+        await this.renderHabitsSection(body);
         break;
       case 'dataPoints':
         this.renderDataPointsSection(body);
@@ -113,7 +115,7 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
 
   // --- Habit Tracking ---
 
-  private renderHabitsSection(containerEl: HTMLElement): void {
+  private async renderHabitsSection(containerEl: HTMLElement): Promise<void> {
     new Setting(containerEl)
       .setName('Habits')
       .setDesc('Create and manage your tracked habits.')
@@ -123,6 +125,23 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
           .setCta()
           .onClick(() => {
             new HabitWizardModal(this.app, this.habitService, this.getWeekStartsOn()).open();
+          })
+      );
+
+    const currentThreshold = await this.pluginSettingsStore.getHeatmapDimThresholdPercent();
+    new Setting(containerEl)
+      .setName('Commitment heatmap — dim below (%)')
+      .setDesc(
+        'On the Habits view\'s overall-commitment heatmap, a day at or below this % of habits completed renders at the dimmest still-colored shade; doing none of that day\'s habits always renders uncolored regardless of this setting.'
+      )
+      .addText((text) =>
+        text
+          .setValue(String(currentThreshold))
+          .setPlaceholder('50')
+          .onChange(async (value) => {
+            const num = Number(value);
+            if (value.trim() === '' || Number.isNaN(num) || num < 1 || num > 100) return;
+            await this.pluginSettingsStore.setHeatmapDimThresholdPercent(num);
           })
       );
   }
@@ -151,6 +170,7 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
     containerEl.createEl('h3', { text: 'Categories' });
     await this.renderCategorySection(containerEl, 'expense', 'Expense categories');
     await this.renderCategorySection(containerEl, 'income', 'Income categories');
+    await this.renderBudgetsSection(containerEl);
     await this.renderRecurringSection(containerEl);
   }
 
@@ -166,6 +186,23 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
           btn.setButtonText('Edit').onClick(() => {
             new AccountModal(this.app, this.moneyService, account, () => this.display()).open();
           })
+        )
+        .addButton((btn) =>
+          btn
+            .setButtonText('Archive')
+            .setWarning()
+            .onClick(() => {
+              new ConfirmModal(
+                this.app,
+                `Archive "${account.name}"?`,
+                'Archived accounts are hidden from balances and the Money view, but nothing is deleted — you can restore this later from a future "show archived accounts" toggle.',
+                async () => {
+                  await this.moneyService.archiveAccount(account.id);
+                  this.display();
+                },
+                'Archive'
+              ).open();
+            })
         );
     }
 
@@ -189,7 +226,9 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Primary currency')
-      .setDesc('Used for net worth and other aggregate totals across accounts of different currencies.')
+      .setDesc(
+        'Every other currency below is valued relative to THIS currency (default USD) — never hardcoded to any specific pair. Change it here if you\'d rather report totals in something other than USD.'
+      )
       .addText((text) =>
         text.setValue(rates.primaryCurrency).onChange(async (value) => {
           const trimmed = value.trim();
@@ -201,6 +240,7 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
     const nonPrimaryCurrencies = knownCurrencies.filter((c) => c !== rates.primaryCurrency);
 
     for (const currency of nonPrimaryCurrencies) {
+      const accountsUsingIt = (await this.moneyService.getAccounts()).filter((a) => a.currency === currency);
       new Setting(containerEl)
         .setName(`${currency} → ${rates.primaryCurrency}`)
         .setDesc(
@@ -218,17 +258,36 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
                 ratesToPrimary: { ...rates.ratesToPrimary, [currency]: num },
               });
             })
+        )
+        .addButton((btn) =>
+          btn
+            .setButtonText('Remove')
+            .setWarning()
+            .onClick(() => {
+              new ConfirmModal(
+                this.app,
+                `Remove ${currency}?`,
+                accountsUsingIt.length > 0
+                  ? `${accountsUsingIt.length} account(s) still use ${currency} (${accountsUsingIt.map((a) => a.name).join(', ')}) — they'll just show as excluded from aggregate totals until a rate is configured again, same as any currency with no rate. Nothing about those accounts is deleted.`
+                  : `No accounts currently use ${currency}.`,
+                async () => {
+                  await this.moneyService.removeCurrencyRate(currency);
+                  this.display();
+                },
+                'Remove'
+              ).open();
+            })
         );
     }
 
     // Any currency can be used — not restricted to a fixed list, and
-    // no longer only derivable from an account that already exists.
-    // This lets a rate be configured in advance, before creating the
-    // account that will use it.
+    // always configured relative to the primary currency above, not to
+    // any one specific hardcoded pair. Lets a rate be set up in
+    // advance, before creating the account that will use it.
     let newCurrencyValue = '';
     new Setting(containerEl)
       .setName('Add a currency')
-      .setDesc('Configure a rate for a currency ahead of creating an account in it.')
+      .setDesc(`Configure a rate for a currency (relative to ${rates.primaryCurrency}) ahead of creating an account in it.`)
       .addText((text) => {
         text.setPlaceholder('e.g. GBP').onChange((value) => {
           newCurrencyValue = value.trim().toUpperCase();
@@ -250,9 +309,17 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
     containerEl.createEl('h4', { text: title });
     const tree = await this.moneyService.getCategoryTree(kind);
 
+    const renameHandler = (id: string, currentName: string) => () => {
+      new RenameModal(this.app, `Rename "${currentName}"`, currentName, async (newName) => {
+        await this.moneyService.renameCategory(id, newName);
+        this.display();
+      }).open();
+    };
+
     for (const node of tree) {
       new Setting(containerEl)
         .setName(node.category.name)
+        .addButton((btn) => btn.setButtonText('Rename').onClick(renameHandler(node.category.id, node.category.name)))
         .addButton((btn) =>
           btn.setButtonText('+ Sub').onClick(() => {
             new CategoryModal(this.app, this.moneyService, kind, node.category.id, () => this.display()).open();
@@ -276,22 +343,25 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
         );
 
       for (const child of node.children) {
-        new Setting(containerEl).setName(`— ${child.name}`).addButton((btn) =>
-          btn
-            .setButtonText('Delete')
-            .setWarning()
-            .onClick(() => {
-              new ConfirmModal(
-                this.app,
-                `Delete "${child.name}"?`,
-                'Existing transactions in this category will show as Uncategorized rather than being deleted.',
-                async () => {
-                  await this.moneyService.deleteCategory(child.id);
-                  this.display();
-                }
-              ).open();
-            })
-        );
+        new Setting(containerEl)
+          .setName(`— ${child.name}`)
+          .addButton((btn) => btn.setButtonText('Rename').onClick(renameHandler(child.id, child.name)))
+          .addButton((btn) =>
+            btn
+              .setButtonText('Delete')
+              .setWarning()
+              .onClick(() => {
+                new ConfirmModal(
+                  this.app,
+                  `Delete "${child.name}"?`,
+                  'Existing transactions in this category will show as Uncategorized rather than being deleted.',
+                  async () => {
+                    await this.moneyService.deleteCategory(child.id);
+                    this.display();
+                  }
+                ).open();
+              })
+          );
       }
     }
 
@@ -302,6 +372,54 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
           new CategoryModal(this.app, this.moneyService, kind, undefined, () => this.display()).open();
         })
       );
+  }
+
+  private async renderBudgetsSection(containerEl: HTMLElement): Promise<void> {
+    containerEl.createEl('h3', { text: 'Budgets' });
+    containerEl.createEl('p', {
+      text: 'A monthly spending cap per category (resets every calendar month). Recording an expense — manually or by buying a shopping-list item — that would push a budgeted category over its limit shows a warning first; nothing is ever blocked automatically.',
+      cls: 'ltk-empty',
+    });
+
+    const [expenseTree, budgets] = await Promise.all([
+      this.moneyService.getCategoryTree('expense'),
+      this.moneyService.getCategoryBudgets(),
+    ]);
+    const budgetByCategory = new Map(budgets.map((b) => [b.categoryId, b.monthlyLimit]));
+
+    const flatCategories: { id: string; label: string }[] = [];
+    for (const node of expenseTree) {
+      flatCategories.push({ id: node.category.id, label: node.category.name });
+      for (const child of node.children) {
+        flatCategories.push({ id: child.id, label: `${node.category.name} / ${child.name}` });
+      }
+    }
+
+    if (flatCategories.length === 0) {
+      containerEl.createEl('p', { text: 'Add an expense category first.', cls: 'ltk-empty' });
+      return;
+    }
+
+    for (const cat of flatCategories) {
+      const existing = budgetByCategory.get(cat.id);
+      new Setting(containerEl)
+        .setName(cat.label)
+        .setDesc('Monthly limit — leave blank for no budget on this category.')
+        .addText((text) =>
+          text
+            .setValue(existing !== undefined ? String(existing) : '')
+            .setPlaceholder('e.g. 500')
+            .onChange(async (value) => {
+              if (value.trim() === '') {
+                await this.moneyService.removeCategoryBudget(cat.id);
+                return;
+              }
+              const num = Number(value);
+              if (Number.isNaN(num) || num <= 0) return;
+              await this.moneyService.setCategoryBudget(cat.id, num);
+            })
+        );
+    }
   }
 
   private async renderRecurringSection(containerEl: HTMLElement): Promise<void> {

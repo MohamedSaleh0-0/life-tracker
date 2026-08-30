@@ -3,22 +3,28 @@
 // recent transactions list. The full finance dashboard's charts
 // (REQ-M026-M033) are still deferred — see design-money-management.md.
 //
-// Fix: data only ever loaded once on mount (refreshKey effect), so
-// creating an account/category in Settings, or creating a shopping
-// list and then closing+reopening this same pane (Obsidian reuses the
-// existing leaf rather than remounting it), left stale state on
-// screen — "No accounts yet" / "No shopping lists yet" persisting
-// after the underlying data had actually changed. This view now
-// re-fetches whenever its leaf becomes the active leaf again, via
-// Obsidian's `active-leaf-change` workspace event, in addition to the
-// existing refreshKey-on-mutation path.
-//
-// Also: the data-fetch used to be an unguarded async IIFE inside
-// useEffect — if any of the underlying reads threw (as they did while
-// transactionLogFile.ts couldn't parse a legacy-format transaction),
-// the rejection was silently swallowed and the view was left frozen
-// on its initial empty state with zero indication anything had gone
-// wrong. Now wrapped in try/catch with a visible error banner.
+// This pass:
+//  - Adds a manual "Refresh" button in the header, alongside the
+//    existing active-leaf-change auto-refresh, since auto-refresh
+//    alone wasn't reliably catching every case new data could show up
+//    (e.g. a transaction logged from the command palette while this
+//    pane was already the active leaf).
+//  - Transaction rows: "Delete" is replaced with "Archive" (removes
+//    it from this default view, without touching its balance impact)
+//    and a new "Refund" button (records a new, opposite-signed
+//    transaction that adds the money back, leaving the original
+//    transaction untouched). A "Show archived" toggle reveals the
+//    archived list with an "Unarchive" action.
+//  - Shopping list cards get inline Rename/Delete affordances via the
+//    detail modal (ShoppingListDetailModal), which now supports both,
+//    PLUS a "+ Add item" button directly on the card (no longer
+//    requiring opening the detail modal first just to add one item) —
+//    also fixed to actually refresh this view's own state (balances,
+//    shopping summaries, recent transactions) after any change made
+//    inside the detail modal, not just after renaming/deleting the
+//    list itself.
+//  - Transaction rows show an Essential/Judgment badge when set, with
+//    an "Edit tags" action to set/change them after the fact.
 
 import React, { useEffect, useState } from 'react';
 import { ItemView, WorkspaceLeaf } from 'obsidian';
@@ -27,11 +33,17 @@ import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { TransactionEntryModal } from './TransactionEntryModal';
 import { ShoppingListModal } from './ShoppingListModal';
 import { ShoppingListDetailModal } from './ShoppingListDetailModal';
+import { ShoppingItemModal } from './ShoppingItemModal';
+import { TransactionTagsModal } from './TransactionTagsModal';
 import { MoneyService, AccountWithBalance } from '../application/moneyService';
-import { Account, RecurringEntry, ShoppingList, Transaction } from '../domain/types';
+import { Account, RecurringEntry, ShoppingList, Transaction, JUDGMENT_OPTIONS } from '../domain/types';
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
 
 export const VIEW_TYPE_MONEY_TRACKER = 'life-tracker-money';
+
+function judgmentLabel(judgment: Transaction['judgment']): string {
+  return JUDGMENT_OPTIONS.find((o) => o.value === judgment)?.label ?? judgment ?? '';
+}
 
 function formatAmount(amount: number, currency: string): string {
   const sign = amount < 0 ? '-' : '';
@@ -47,6 +59,8 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
   const [accountsWithBalances, setAccountsWithBalances] = useState<AccountWithBalance[]>([]);
   const [netWorth, setNetWorth] = useState<{ total: number; excludedAccounts: Account[] } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [archivedTransactions, setArchivedTransactions] = useState<Transaction[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
   const [categoryLabels, setCategoryLabels] = useState<Map<string, string>>(new Map());
   const [primaryCurrency, setPrimaryCurrency] = useState('USD');
   const [dueRecurring, setDueRecurring] = useState<RecurringEntry[]>([]);
@@ -70,11 +84,14 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
     let cancelled = false;
     (async () => {
       try {
-        const [withBalances, worth, rates, recentTxs, due, lists] = await Promise.all([
+        const rangeStart = addDaysLocal(getTodayLocal(), -30);
+        const rangeEnd = getTodayLocal();
+        const [withBalances, worth, rates, recentTxs, archivedTxs, due, lists] = await Promise.all([
           moneyService.getAccountsWithBalances(),
           moneyService.getNetWorth(),
           moneyService.getExchangeRates(),
-          moneyService.listTransactions(addDaysLocal(getTodayLocal(), -30), getTodayLocal()),
+          moneyService.listTransactions(rangeStart, rangeEnd),
+          moneyService.getArchivedTransactions(rangeStart, rangeEnd),
           moneyService.getDueRecurringEntries(),
           moneyService.getShoppingLists(),
         ]);
@@ -86,6 +103,7 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
         setPrimaryCurrency(rates.primaryCurrency);
         const recent = recentTxs.slice(0, 25);
         setTransactions(recent);
+        setArchivedTransactions(archivedTxs.slice(0, 25));
         setDueRecurring(due);
         setShoppingLists(lists);
 
@@ -96,7 +114,7 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
         if (!cancelled) setShoppingSummaries(summaries);
 
         const labels = new Map<string, string>();
-        for (const t of recent) {
+        for (const t of [...recent, ...archivedTxs]) {
           if (t.categoryId && !labels.has(t.categoryId)) {
             labels.set(t.categoryId, await moneyService.resolveCategoryLabel(t.categoryId));
           }
@@ -124,8 +142,18 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
     new TransactionEntryModal(view.app, moneyService, freshAccounts, refresh).open();
   };
 
-  const handleDeleteTransaction = async (t: Transaction) => {
-    await moneyService.deleteTransaction(t.date, t.id);
+  const handleArchiveTransaction = async (t: Transaction) => {
+    await moneyService.archiveTransaction(t.date, t.id);
+    refresh();
+  };
+
+  const handleUnarchiveTransaction = async (t: Transaction) => {
+    await moneyService.unarchiveTransaction(t.date, t.id);
+    refresh();
+  };
+
+  const handleRefundTransaction = async (t: Transaction) => {
+    await moneyService.refundTransaction(t.date, t.id);
     refresh();
   };
 
@@ -141,13 +169,62 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
 
   const accountLookup = new Map(accountsWithBalances.map((w) => [w.account.id, w.account]));
 
+  const renderTransactionRow = (t: Transaction, archivedView: boolean) => {
+    const account = accountLookup.get(t.accountId);
+    const description =
+      t.name || (t.type === 'transfer' ? 'Transfer' : t.type === 'adjustment' ? 'Adjustment' : 'Untitled');
+    return (
+      <li key={t.id}>
+        <span className="ltk-money-tx__date">
+          {t.date} {t.time}
+        </span>
+        <span className="ltk-money-tx__desc">
+          {description}
+          {t.categoryId && <span className="ltk-money-tx__category"> · {categoryLabels.get(t.categoryId) ?? '…'}</span>}
+          {t.refundOfTransactionId && <span className="ltk-money-tx__tag"> refund</span>}
+          {t.essential === true && <span className="ltk-money-tx__tag ltk-money-tx__tag--essential"> essential</span>}
+          {t.essential === false && t.judgment && (
+            <span className="ltk-money-tx__tag ltk-money-tx__tag--judgment"> {judgmentLabel(t.judgment)}</span>
+          )}
+        </span>
+        <span className={`ltk-money-tx__amount ltk-money-tx__amount--${t.amount < 0 ? 'neg' : 'pos'}`}>
+          {formatAmount(t.amount, account?.currency ?? '')}
+        </span>
+        {archivedView ? (
+          <button type="button" onClick={() => handleUnarchiveTransaction(t)}>
+            Unarchive
+          </button>
+        ) : (
+          <>
+            <button type="button" onClick={() => handleRefundTransaction(t)}>
+              Refund
+            </button>
+            <button type="button" onClick={() => handleArchiveTransaction(t)}>
+              Archive
+            </button>
+            {t.type === 'expense' && (
+              <button type="button" onClick={() => new TransactionTagsModal(view.app, moneyService, t, refresh).open()}>
+                Edit tags
+              </button>
+            )}
+          </>
+        )}
+      </li>
+    );
+  };
+
   return (
     <div className="ltk-habit-view">
       <div className="ltk-habit-view__header">
         <h2>Money</h2>
-        <button type="button" className="ltk-button ltk-button--accent" onClick={handleAddTransaction}>
-          + Add transaction
-        </button>
+        <div className="ltk-habit-view__header-actions">
+          <button type="button" className="ltk-icon-button" onClick={refresh} aria-label="Refresh" title="Refresh">
+            ⟳
+          </button>
+          <button type="button" className="ltk-button ltk-button--accent" onClick={handleAddTransaction}>
+            + Add transaction
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -219,46 +296,50 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
               <div
                 key={list.id}
                 className="ltk-shopping-list-card"
-                onClick={() => new ShoppingListDetailModal(view.app, moneyService, list, accounts).open()}
+                onClick={() => new ShoppingListDetailModal(view.app, moneyService, list, accounts, refresh).open()}
               >
                 <span className="ltk-shopping-list-card__name">{list.name}</span>
                 <span className="ltk-shopping-list-card__summary">
                   {summary ? `${summary.pendingCount} pending` : '…'}
                   {summary && summary.estimatedTotal > 0 ? ` · est. ${summary.estimatedTotal.toFixed(2)}` : ''}
                 </span>
+                <button
+                  type="button"
+                  className="ltk-shopping-list-card__add"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    new ShoppingItemModal(view.app, moneyService, list.id, refresh).open();
+                  }}
+                >
+                  + Add item
+                </button>
               </div>
             );
           })}
         </div>
       )}
 
-      <h3>Recent transactions</h3>
-      {transactions.length === 0 && <p className="ltk-empty">No transactions in the last 30 days.</p>}
-      {transactions.length > 0 && (
-        <ul className="ltk-money-transactions">
-          {transactions.map((t) => {
-            const account = accountLookup.get(t.accountId);
-            const description =
-              t.name || (t.type === 'transfer' ? 'Transfer' : t.type === 'adjustment' ? 'Adjustment' : 'Untitled');
-            return (
-              <li key={t.id}>
-                <span className="ltk-money-tx__date">
-                  {t.date} {t.time}
-                </span>
-                <span className="ltk-money-tx__desc">
-                  {description}
-                  {t.categoryId && <span className="ltk-money-tx__category"> · {categoryLabels.get(t.categoryId) ?? '…'}</span>}
-                </span>
-                <span className={`ltk-money-tx__amount ltk-money-tx__amount--${t.amount < 0 ? 'neg' : 'pos'}`}>
-                  {formatAmount(t.amount, account?.currency ?? '')}
-                </span>
-                <button type="button" onClick={() => handleDeleteTransaction(t)}>
-                  Delete
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+      <div className="ltk-money-section-header">
+        <h3>{showArchived ? 'Archived transactions' : 'Recent transactions'}</h3>
+        <button type="button" onClick={() => setShowArchived((v) => !v)}>
+          {showArchived ? 'Show recent' : 'Show archived'}
+        </button>
+      </div>
+
+      {showArchived ? (
+        <>
+          {archivedTransactions.length === 0 && <p className="ltk-empty">No archived transactions.</p>}
+          {archivedTransactions.length > 0 && (
+            <ul className="ltk-money-transactions">{archivedTransactions.map((t) => renderTransactionRow(t, true))}</ul>
+          )}
+        </>
+      ) : (
+        <>
+          {transactions.length === 0 && <p className="ltk-empty">No transactions in the last 30 days.</p>}
+          {transactions.length > 0 && (
+            <ul className="ltk-money-transactions">{transactions.map((t) => renderTransactionRow(t, false))}</ul>
+          )}
+        </>
       )}
     </div>
   );
@@ -304,7 +385,9 @@ export class MoneyTrackerView extends ItemView {
     // "I edited accounts/categories in Settings, then switched back to
     // this already-open tab" and "I closed this pane and reopened it"
     // (Obsidian reuses the existing leaf rather than remounting it, so
-    // onOpen() alone only fires once per leaf's lifetime).
+    // onOpen() alone only fires once per leaf's lifetime). The header's
+    // manual Refresh button covers everything else (e.g. logging a
+    // transaction via the command palette while this pane stays active).
     this.registerEvent(
       this.app.workspace.on('active-leaf-change', (leaf) => {
         if (leaf === this.leaf) {

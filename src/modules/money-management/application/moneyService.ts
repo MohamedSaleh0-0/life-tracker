@@ -3,6 +3,14 @@
 // into the operations the UI layer calls. No direct file I/O of its
 // own. Mirrors habitService.ts/dataPointService.ts's structure and DI
 // pattern. See design-money-management.md for scope/rationale.
+//
+// Update (this pass): category budgets. checkBudget() is the one new
+// entry point the UI calls before recording an expense (or a shopping
+// purchase, which creates one) against a budgeted category — it
+// reports whether the transaction would push that category's spend
+// for the current calendar month over its configured limit, without
+// blocking anything itself; the UI layer decides whether to warn and
+// let the user confirm or cancel.
 
 import {
   Account,
@@ -19,6 +27,9 @@ import {
   ShoppingItem,
   NewShoppingItemInput,
   MarkItemBoughtInput,
+  CategoryBudget,
+  BudgetCheckResult,
+  TransactionJudgment,
 } from '../domain/types';
 import { calculateAccountBalance, calculateIncomeExpenseTotals } from '../domain/balanceCalculator';
 import { convertToPrimary } from '../domain/currencyConverter';
@@ -26,7 +37,7 @@ import { buildCategoryTree, CategoryNode, resolveCategoryLabel } from '../domain
 import { isRecurringEntryDue } from '../domain/recurringDueCalculator';
 import { MoneySettingsStore } from '../infrastructure/moneySettingsStore';
 import { TransactionLogFile, RawTransaction } from '../infrastructure/transactionLogFile';
-import { getTodayLocal } from '../../../core/date';
+import { getTodayLocal, monthBoundsFor } from '../../../core/date';
 
 export interface MoneyServiceDeps {
   settingsStore: MoneySettingsStore;
@@ -86,6 +97,14 @@ export class MoneyService {
     return this.settingsStore.updateAccount(id, patch);
   }
 
+  async archiveAccount(id: string): Promise<void> {
+    await this.settingsStore.updateAccount(id, { archived: true });
+  }
+
+  async unarchiveAccount(id: string): Promise<void> {
+    await this.settingsStore.updateAccount(id, { archived: false });
+  }
+
   async getAccounts(): Promise<Account[]> {
     const all = await this.settingsStore.getAccounts();
     return all.filter((a) => !a.archived).sort((a, b) => a.order - b.order);
@@ -107,6 +126,36 @@ export class MoneyService {
         balance,
         balanceInPrimary: convertToPrimary(balance, account.currency, rates),
       };
+    });
+  }
+
+  /** Just the computed current balance for one account (REQ-M004/M007) — used by the account edit form, which shows/edits the current balance rather than the historical opening balance. */
+  async getAccountBalance(accountId: string): Promise<number> {
+    const [account, rawTxs] = await Promise.all([this.settingsStore.getAccount(accountId), this.logFile.readAll()]);
+    if (!account) throw new Error(`Account not found: ${accountId}`);
+    return calculateAccountBalance(account, rawTxs.map(toDomainTransaction));
+  }
+
+  /**
+   * Adjusts an account's CURRENT balance to `targetBalance` by recording
+   * a single balance-correction adjustment transaction for the
+   * difference (never by rewriting `openingBalance`, which per
+   * PROJECT_PRINCIPLES.md/REQ-M004 must stay untouched — a balance
+   * changes only via a recorded transaction, so an edited "current
+   * balance" becomes a dated adjustment, same as the manual adjustment
+   * transaction type already supports). No-op (no transaction created)
+   * if the target already equals the current balance.
+   */
+  async setAccountCurrentBalance(accountId: string, targetBalance: number, date?: string): Promise<Transaction | null> {
+    const currentBalance = await this.getAccountBalance(accountId);
+    const delta = targetBalance - currentBalance;
+    if (delta === 0) return null;
+    return this.recordTransaction({
+      date: date ?? this.today(),
+      accountId,
+      type: 'adjustment',
+      amount: delta,
+      name: 'Balance adjustment (manual correction)',
     });
   }
 
@@ -133,7 +182,15 @@ export class MoneyService {
     await this.settingsStore.setExchangeRates(rates);
   }
 
-  /** Every currency in active use by an account, or configured with a rate — lets the settings UI offer "add a currency" ahead of creating an account in it, not just currencies already in use. */
+  /** Removes a configured currency's rate entirely. Any account still using that currency simply falls back to "no rate configured" (excluded and flagged in aggregates), same as before it was ever added — nothing about the account itself is touched. */
+  async removeCurrencyRate(currency: string): Promise<void> {
+    const rates = await this.settingsStore.getExchangeRates();
+    if (currency === rates.primaryCurrency) return; // the primary currency isn't a "rate" to remove
+    const { [currency]: _removed, ...rest } = rates.ratesToPrimary;
+    await this.settingsStore.setExchangeRates({ ...rates, ratesToPrimary: rest });
+  }
+
+  /** Every currency in active use by an account, or configured with a rate — lets the settings UI offer "add a currency" ahead of creating an account in it. Every rate is always "1 unit of this currency = N units of the primary currency" — never hardcoded to any one specific pair; the primary currency itself (default USD) is just as editable as any other. */
   async getKnownCurrencies(): Promise<string[]> {
     const [accounts, rates] = await Promise.all([this.getAccounts(), this.getExchangeRates()]);
     const set = new Set<string>();
@@ -170,6 +227,55 @@ export class MoneyService {
     return buildCategoryTree(all, kind);
   }
 
+  // --- Budgets ---
+
+  async getCategoryBudgets(): Promise<CategoryBudget[]> {
+    return this.settingsStore.getCategoryBudgets();
+  }
+
+  async setCategoryBudget(categoryId: string, monthlyLimit: number): Promise<CategoryBudget> {
+    return this.settingsStore.setCategoryBudget(categoryId, monthlyLimit);
+  }
+
+  async removeCategoryBudget(categoryId: string): Promise<void> {
+    await this.settingsStore.removeCategoryBudget(categoryId);
+  }
+
+  /** Sum of expense transactions (as a positive magnitude) against exactly this category id, within [rangeStart, rangeEnd]. Archived transactions still count — archiving is organizational, not a reversal of the spend. Does not roll up subcategories; each category (main or sub) tracks its own budget and its own spend. */
+  async getCategorySpend(categoryId: string, rangeStart: string, rangeEnd: string): Promise<number> {
+    const raw = await this.logFile.readRange(rangeStart, rangeEnd);
+    return raw
+      .filter((t) => t.type === 'expense' && t.categoryId === categoryId)
+      .reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0);
+  }
+
+  /**
+   * Checks whether adding `additionalAmount` of expense to `categoryId`
+   * on `date` would exceed that category's configured monthly budget.
+   * Returns null if the category has no budget configured (nothing to
+   * check). Purely informational — recording the transaction is a
+   * separate step the UI takes afterward regardless of the result;
+   * this never blocks anything on its own.
+   */
+  async checkBudget(categoryId: string | undefined, additionalAmount: number, date: string): Promise<BudgetCheckResult | null> {
+    if (!categoryId) return null;
+    const budgets = await this.settingsStore.getCategoryBudgets();
+    const budget = budgets.find((b) => b.categoryId === categoryId);
+    if (!budget) return null;
+
+    const [rangeStart, rangeEnd] = monthBoundsFor(date);
+    const currentSpend = await this.getCategorySpend(categoryId, rangeStart, rangeEnd);
+    const projectedSpend = currentSpend + Math.abs(additionalAmount);
+
+    return {
+      categoryId,
+      monthlyLimit: budget.monthlyLimit,
+      currentSpend,
+      projectedSpend,
+      exceeded: projectedSpend > budget.monthlyLimit,
+    };
+  }
+
   // --- Transactions ---
 
   async recordTransaction(input: NewTransactionInput): Promise<Transaction> {
@@ -185,6 +291,10 @@ export class MoneyService {
       transferPairId: '',
       recurringEntryId: input.recurringEntryId ?? '',
       shoppingItemId: input.shoppingItemId ?? '',
+      archived: '',
+      refundOf: '',
+      essential: input.essential === undefined ? '' : input.essential ? 'true' : 'false',
+      judgment: input.essential === false ? (input.judgment ?? '') : '',
       name: input.name,
       note: input.note,
     };
@@ -209,6 +319,10 @@ export class MoneyService {
       transferPairId: pairId,
       recurringEntryId: '',
       shoppingItemId: '',
+      archived: '',
+      refundOf: '',
+      essential: '',
+      judgment: '',
       note: input.note,
     };
     const toLeg: RawTransaction = {
@@ -223,6 +337,10 @@ export class MoneyService {
       transferPairId: pairId,
       recurringEntryId: '',
       shoppingItemId: '',
+      archived: '',
+      refundOf: '',
+      essential: '',
+      judgment: '',
       note: input.note,
     };
     await this.logFile.upsertTransaction(fromLeg);
@@ -253,7 +371,81 @@ export class MoneyService {
     }
   }
 
-  /** REQ-M010: undo the most recently recorded transaction (or both legs of the most recent transfer) within the current session. Routes through deleteTransaction so a shopping-purchase revert (REQ-M034) applies here too, per the requirements doc's explicit note. No-op if nothing's been recorded yet this session. */
+  /**
+   * Organizational hide/show — an archived transaction is excluded
+   * from the default transaction list (and getArchivedTransactions
+   * surfaces the archived set) but keeps counting toward account
+   * balances AND toward budget spend, since archiving doesn't undo the
+   * money movement the way delete or refund do.
+   */
+  async archiveTransaction(date: string, id: string): Promise<void> {
+    await this.logFile.setArchived(date, id, true);
+  }
+
+  async unarchiveTransaction(date: string, id: string): Promise<void> {
+    await this.logFile.setArchived(date, id, false);
+  }
+
+  /**
+   * Refunds a transaction by recording a brand-new transaction with
+   * the reversed amount on the same account (and category, when the
+   * original had one) — "adds the money back" without touching the
+   * original at all, so both the original charge and the refund stay
+   * visible in history (and the refund correctly reduces the
+   * category's budget spend going forward, since it's just another
+   * transaction against that category). Transfers are refunded as an
+   * adjustment on the refunded leg's own account.
+   */
+  async refundTransaction(date: string, id: string, refundDate?: string): Promise<Transaction> {
+    const original = await this.logFile.findTransaction(date, id);
+    if (!original) throw new Error(`Transaction not found: ${id} on ${date}`);
+
+    const reversedAmount = -Number(original.amount);
+    const raw: RawTransaction = {
+      id: this.idGenerator(),
+      date: refundDate ?? this.today(),
+      time: this.nowHHMM(),
+      accountId: original.accountId,
+      type: original.type === 'transfer' ? 'adjustment' : original.type,
+      categoryId: original.categoryId,
+      amount: String(reversedAmount),
+      quantity: '',
+      transferPairId: '',
+      recurringEntryId: '',
+      shoppingItemId: '',
+      archived: '',
+      refundOf: id,
+      essential: '',
+      judgment: '',
+      name: original.name ? `Refund: ${original.name}` : 'Refund',
+      note: original.note,
+    };
+    await this.logFile.upsertTransaction(raw);
+    this.lastRecorded = { date: raw.date, ids: [raw.id] };
+    return toDomainTransaction(raw);
+  }
+
+  /**
+   * Edits an existing transaction's Essential flag and/or Judgment
+   * rating in place — the one "editing an existing entry" surface this
+   * pass adds, deliberately scoped to just these two fields rather
+   * than a full transaction editor (amount/date/account/etc. editing
+   * wasn't asked for). Judgment is only meaningful when essential is
+   * false; passing essential=true clears any judgment automatically.
+   */
+  async updateTransactionTags(
+    date: string,
+    id: string,
+    essential: boolean | undefined,
+    judgment: TransactionJudgment | undefined
+  ): Promise<void> {
+    await this.logFile.updateFields(date, id, {
+      essential: essential === undefined ? '' : essential ? 'true' : 'false',
+      judgment: essential === false ? (judgment ?? '') : '',
+    });
+  }
+
+  /** REQ-M010: undo the most recently recorded transaction (or both legs of the most recent transfer) within the current session. Routes through deleteTransaction so a shopping-purchase revert (REQ-M034) applies here too. No-op if nothing's been recorded yet this session. */
   async undoLastTransaction(): Promise<boolean> {
     if (!this.lastRecorded) return false;
     const { date, ids } = this.lastRecorded;
@@ -264,9 +456,20 @@ export class MoneyService {
     return true;
   }
 
-  async listTransactions(rangeStart: string, rangeEnd: string): Promise<Transaction[]> {
+  /** Active (non-archived) transactions in a range — the default view. Pass includeArchived to also get archived ones mixed in. */
+  async listTransactions(rangeStart: string, rangeEnd: string, includeArchived = false): Promise<Transaction[]> {
     const raw = await this.logFile.readRange(rangeStart, rangeEnd);
-    return raw.map(toDomainTransaction).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+    const filtered = includeArchived ? raw : raw.filter((t) => t.archived !== 'true');
+    return filtered.map(toDomainTransaction).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  }
+
+  /** Only the archived transactions in a range, for a dedicated "Archived" view. */
+  async getArchivedTransactions(rangeStart: string, rangeEnd: string): Promise<Transaction[]> {
+    const raw = await this.logFile.readRange(rangeStart, rangeEnd);
+    return raw
+      .filter((t) => t.archived === 'true')
+      .map(toDomainTransaction)
+      .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
   }
 
   async getIncomeExpenseTotals(rangeStart: string, rangeEnd: string): Promise<{ income: number; expense: number }> {
@@ -349,8 +552,7 @@ export class MoneyService {
    * REQ-M020/M035: logs a due recurring entry — creates a transaction
    * linked back to the recurring entry's id (for traceability; later
    * edits to the template never retroactively alter transactions
-   * already logged from earlier cycles, since this just copies the
-   * current values once) and advances lastHandledDate.
+   * already logged from earlier cycles) and advances lastHandledDate.
    */
   async logRecurringEntry(id: string, date: string): Promise<Transaction> {
     const all = await this.settingsStore.getRecurringEntries();
@@ -389,6 +591,10 @@ export class MoneyService {
       order: existing.length,
     };
     return this.settingsStore.createShoppingList(list);
+  }
+
+  async renameShoppingList(id: string, name: string): Promise<ShoppingList> {
+    return this.settingsStore.updateShoppingList(id, { name });
   }
 
   async deleteShoppingList(id: string): Promise<void> {
@@ -441,6 +647,8 @@ export class MoneyService {
    * REQ-M023: marking a pending item bought creates a linked expense
    * transaction using the actual price/account/date, using the item's
    * name/category/quantity, and moves the item into purchase history.
+   * Budget checking happens in the UI layer (via checkBudget) before
+   * this is called, same as for a manually-entered expense.
    */
   async markShoppingItemBought(itemId: string, input: MarkItemBoughtInput): Promise<Transaction> {
     const items = await this.settingsStore.getShoppingItems();
@@ -457,6 +665,8 @@ export class MoneyService {
       quantity: item.quantity,
       name: item.name,
       shoppingItemId: item.id,
+      essential: input.essential,
+      judgment: input.judgment,
     });
 
     await this.settingsStore.updateShoppingItem(itemId, {
@@ -484,6 +694,10 @@ function toDomainTransaction(raw: RawTransaction): Transaction {
     transferPairId: raw.transferPairId || undefined,
     recurringEntryId: raw.recurringEntryId || undefined,
     shoppingItemId: raw.shoppingItemId || undefined,
+    archived: raw.archived === 'true',
+    refundOfTransactionId: raw.refundOf || undefined,
+    essential: raw.essential === 'true' ? true : raw.essential === 'false' ? false : undefined,
+    judgment: (raw.judgment || undefined) as Transaction['judgment'],
     name: raw.name,
     note: raw.note,
   };

@@ -1,0 +1,106 @@
+/* ---------- Round 3 additions — append to the end of styles.css, nothing above changed ---------- */
+
+/* Header action row (Refresh + primary action) shared by Habit,
+   Data Point, and Money tracker views. */
+.ltk-habit-view__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ltk-habit-view__header-actions button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.ltk-habit-view__header-actions button:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Refund / archive tag on a transaction row */
+.ltk-money-tx__tag {
+  font-size: var(--font-ui-smaller);
+  color: var(--interactive-accent);
+  font-style: italic;
+}
+
+/* Shopping list detail modal — Rename/Delete list actions */
+.ltk-shopping-detail__list-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ltk-shopping-detail__list-actions button {
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.ltk-shopping-detail__list-actions button.mod-warning {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+.ltk-shopping-detail__list-actions button.mod-warning:hover {
+  background: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+/* Clock picker (time-of-day / duration data point entry) */
+.ltk-clock-field {
+  margin-bottom: 12px;
+}
+
+.ltk-clock-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.ltk-clock-picker__face {
+  touch-action: none;
+  user-select: none;
+}
+
+.ltk-clock-picker__manual,
+.ltk-clock-picker__manual-row .ltk-clock-picker__manual {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  align-items: center;
+}
+
+.ltk-clock-picker__manual input,
+.ltk-clock-picker__manual-row input {
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ltk-clock-picker__manual-row {
+  display: flex;
+  gap: 20px;
+}

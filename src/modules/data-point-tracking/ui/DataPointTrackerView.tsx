@@ -1,8 +1,16 @@
 // ItemView hosting Data Point Tracking's dashboard — mirrors
-// HabitTrackerView's structure exactly (see that file's header comment
-// for the rationale: a real navigable home per module, REQ-C002).
+// HabitTrackerView's structure (see that file's header comment for
+// the rationale: a real navigable home per module, REQ-C002).
+//
+// Update: this view previously only ever fetched data once on mount
+// (via the key-remount trick on refreshKey after a mutation made
+// through it), so entries logged elsewhere, or just switching back to
+// an already-open pane, could leave stale "today" data on screen.
+// Now mirrors MoneyTrackerView's refresh strategy: re-fetches on
+// active-leaf-change, plus a manual "Refresh" button in the header for
+// anything that pattern doesn't catch.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
@@ -23,6 +31,15 @@ function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootPr
   const [selected, setSelected] = useState<DataPointDefinition | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
+
+  // Registers `refresh` with the hosting ItemView so active-leaf-change
+  // (see DataPointTrackerView below) can trigger a re-fetch from
+  // outside this function component, same pattern as MoneyTrackerView.
+  useEffect(() => {
+    view.registerRefreshHandler(refresh);
+    return () => view.registerRefreshHandler(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   if (selected) {
     return (
@@ -51,13 +68,18 @@ function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootPr
     <div className="ltk-habit-view">
       <div className="ltk-habit-view__header">
         <h2>Data Points</h2>
-        <button
-          type="button"
-          className="ltk-button ltk-button--accent"
-          onClick={() => new DataPointWizardModal(view.app, dataPointService, undefined, refresh).open()}
-        >
-          + New data point
-        </button>
+        <div className="ltk-habit-view__header-actions">
+          <button type="button" className="ltk-icon-button" onClick={refresh} aria-label="Refresh" title="Refresh">
+            ⟳
+          </button>
+          <button
+            type="button"
+            className="ltk-button ltk-button--accent"
+            onClick={() => new DataPointWizardModal(view.app, dataPointService, undefined, refresh).open()}
+          >
+            + New data point
+          </button>
+        </div>
       </div>
       <DataPointDashboardList
         key={refreshKey}
@@ -71,6 +93,7 @@ function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootPr
 
 export class DataPointTrackerView extends ItemView {
   private root: Root | null = null;
+  private refreshHandler: (() => void) | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -91,12 +114,24 @@ export class DataPointTrackerView extends ItemView {
     return 'line-chart';
   }
 
+  registerRefreshHandler(handler: (() => void) | null): void {
+    this.refreshHandler = handler;
+  }
+
   async onOpen(): Promise<void> {
     this.root = createRoot(this.contentEl);
     this.root.render(
       <ErrorBoundary>
         <DataPointTrackerRoot view={this} dataPointService={this.dataPointService} />
       </ErrorBoundary>
+    );
+
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', (leaf) => {
+        if (leaf === this.leaf) {
+          this.refreshHandler?.();
+        }
+      })
     );
   }
 

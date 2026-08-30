@@ -1,0 +1,188 @@
+/* ---------- Round 4 additions — append to the end of styles.css, nothing above changed ---------- */
+
+/* Small icon-only header button (Refresh) — replaces the earlier
+   oversized text button that rendered as a big misaligned box.
+   Extra-specific selector below (.ltk-habit-view__header-actions
+   .ltk-icon-button) is needed to beat round3's generic
+   ".ltk-habit-view__header-actions button" padding/sizing rule. */
+.ltk-icon-button,
+.ltk-habit-view__header-actions .ltk-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ltk-icon-button:hover,
+.ltk-habit-view__header-actions .ltk-icon-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.ltk-icon-button:active,
+.ltk-habit-view__header-actions .ltk-icon-button:active {
+  transform: scale(0.92);
+}
+
+/* Calendar heatmap hover tooltip */
+.ltk-calendar-heatmap__tooltip {
+  white-space: nowrap;
+}
+
+.ltk-heatmap-legend__level {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+}
+
+/* Clock picker — 12-hour face + AM/PM toggle */
+.ltk-clock-picker__meridiem {
+  display: flex;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ltk-clock-picker__meridiem button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 4px 10px;
+  border: none;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ltk-clock-picker__meridiem button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ltk-clock-picker__manual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.ltk-clock-picker__manual label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+/* Custom-levels habit: level list editor (wizard) */
+.ltk-level-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ltk-level-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ltk-level-editor__index {
+  width: 18px;
+  text-align: right;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.ltk-level-editor__row input {
+  flex: 1;
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ltk-level-editor__row button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ltk-level-editor__row button:hover:not(:disabled) {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.ltk-level-editor__row button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ltk-level-editor__add {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--font-ui-small);
+  padding: 5px 12px;
+  border-radius: var(--radius-s);
+  border: 1px dashed var(--background-modifier-border);
+  background: transparent;
+  color: var(--interactive-accent);
+  cursor: pointer;
+}
+
+.ltk-level-editor__add:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Custom-levels habit: dashboard chip picker */
+.ltk-level-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ltk-level-picker button {
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ltk-level-picker button:hover {
+  border-color: var(--interactive-accent);
+}
+
+.ltk-level-picker button.is-selected {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}

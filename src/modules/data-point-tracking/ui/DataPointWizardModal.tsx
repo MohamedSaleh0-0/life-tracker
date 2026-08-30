@@ -5,12 +5,11 @@
 // StepWizard.tsx for why (avoids the render-phase-state bug class
 // entirely).
 //
-// Adds 'duration' as a fourth type: the user logs a start and end time
-// for an activity (sleep, play time, shopping time, ...) instead of
-// computing and typing a number by hand — duration is calculated
-// automatically (src/modules/data-point-tracking/domain/duration.ts).
-// Reuses the existing multi-entry-per-day model, so "more than one
-// sleep/play/shopping entry a day" already just works.
+// Update: dropped the "Sleep duration" number template — now that the
+// dedicated 'duration' type (start -> end, via the clock picker)
+// exists and covers sleep tracking properly, a plain hand-typed
+// "hours slept" number template was redundant and just invited
+// double-tracking the same thing two different ways.
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -23,7 +22,6 @@ import { DataPointDefinition, DataPointType } from '../domain/types';
 // REQ-D002: at least three built-in templates.
 const TEMPLATES: { label: string; name: string; type: DataPointType; unit?: string }[] = [
   { label: '⚖️ Weight', name: 'Weight', type: 'number', unit: 'kg' },
-  { label: '😴 Sleep duration', name: 'Sleep duration', type: 'number', unit: 'hours' },
   { label: '⏰ Wake-up time', name: 'Wake-up time', type: 'time' },
   { label: '🛌 Sleep (start → end)', name: 'Sleep', type: 'duration' },
 ];

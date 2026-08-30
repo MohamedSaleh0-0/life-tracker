@@ -1,26 +1,28 @@
 // The consolidated expense/income/transfer/adjustment entry form
-// (REQ-M005) — one form, a type selector switches the visible fields,
-// rather than four separate forms. For expense, also offers "add to a
-// shopping list instead of logging it now" right in this same flow
-// (per the user's explicit ask — not a separate command).
+// (REQ-M005) — one form, a type selector switches the visible fields.
+// For expense, also offers "add to a shopping list instead of logging
+// it now" right in this same flow.
 //
-// Update: three ergonomics asks addressed in this pass —
-//  1. Category picker can now create a brand-new main category, or a
-//     new subcategory under an existing main category, inline —
-//     instead of forcing a trip to Settings first.
-//  2. "Add to a shopping list instead" can now create a brand-new
-//     shopping list inline too, same pattern as (1).
-//  3. Amount is now a -5/+5 stepper (mirrors the habit dashboard's
-//     NumericStepper) with the number still directly editable by hand.
+// This pass adds two things, both scoped to expense transactions only
+// (the two only make sense for spending):
+//  - Budget check: if the chosen category has a monthly budget
+//    configured, submitting an amount that would push this month's
+//    spend over that limit pops a warning (via confirmAsync) before
+//    the transaction is actually recorded — the user can still
+//    proceed, this never silently blocks anything.
+//  - Essential (required) + Judgment (required, only when not
+//    essential) capture, via the shared EssentialJudgmentFields.
 
 import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
+import { confirmAsync } from '../../../shared/ui-kit/ConfirmModal';
 import { MoneyService } from '../application/moneyService';
-import { Account, ShoppingList, TransactionType } from '../domain/types';
+import { Account, ShoppingList, TransactionJudgment, TransactionType } from '../domain/types';
 import { CategoryNode } from '../domain/categoryTree';
 import { getTodayLocal } from '../../../core/date';
+import { EssentialJudgmentFields, essentialJudgmentValid } from './EssentialJudgmentFields';
 
 const NEW_OPTION = '__new__';
 
@@ -29,7 +31,7 @@ function nowHHMM(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
-/** -5/+5 stepper with the number still directly editable — same interaction pattern as HabitDashboardList's NumericStepper, reused here for transaction amounts. */
+/** -5/+5 stepper with the number still directly editable. */
 function AmountStepper({
   value,
   onChange,
@@ -71,13 +73,14 @@ function AmountStepper({
 }
 
 interface TransactionFormProps {
+  app: App;
   moneyService: MoneyService;
   accounts: Account[];
   onCancel: () => void;
   onSaved: () => void;
 }
 
-function TransactionForm({ moneyService, accounts, onCancel, onSaved }: TransactionFormProps) {
+function TransactionForm({ app, moneyService, accounts, onCancel, onSaved }: TransactionFormProps) {
   const [date, setDate] = useState(getTodayLocal());
   const [time, setTime] = useState(nowHHMM());
   const [type, setType] = useState<TransactionType>('expense');
@@ -88,27 +91,22 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [note, setNote] = useState('');
+  const [essential, setEssential] = useState<boolean | undefined>(undefined);
+  const [judgment, setJudgment] = useState<TransactionJudgment | undefined>(undefined);
   const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([]);
   const [recentNames, setRecentNames] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline "+ New category / subcategory" — REQ-M005's category field,
-  // extended so a missing category doesn't require backing out to
-  // Settings mid-entry.
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryParentId, setNewCategoryParentId] = useState('');
 
-  // "Add to a shopping list instead" — only offered for expenses, per
-  // the request that this live inside the transaction flow rather than
-  // a separate command.
   const [addToShoppingList, setAddToShoppingList] = useState(false);
   const [shoppingLists, setShoppingLists] = useState<ShoppingList[]>([]);
   const [shoppingListId, setShoppingListId] = useState('');
   const [dueDate, setDueDate] = useState('');
 
-  // Inline "+ New list" — same pattern as the category creator above.
   const [showNewList, setShowNewList] = useState(false);
   const [newListName, setNewListName] = useState('');
 
@@ -116,8 +114,6 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
     if (type === 'expense' || type === 'income') {
       moneyService.getCategoryTree(type).then(setCategoryTree);
     }
-    // A category tree from one kind isn't valid for the other — reset
-    // any in-progress inline creation when the type switches.
     setShowNewCategory(false);
   }, [type, moneyService]);
 
@@ -218,6 +214,12 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
       setError('Enter a valid amount.');
       return;
     }
+
+    if (type === 'expense' && !essentialJudgmentValid(essential, judgment)) {
+      setError(essential === undefined ? 'Choose whether this was essential.' : 'Choose a judgment rating.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       if (type === 'transfer') {
@@ -234,9 +236,37 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
           amount: Math.abs(parsedAmount),
           note: note || undefined,
         });
+      } else if (type === 'expense') {
+        // Budget check happens right before recording, using the
+        // freshest possible spend figure — purely informational, never
+        // blocks on its own; the user decides via the confirm dialog.
+        const budgetCheck = await moneyService.checkBudget(categoryId || undefined, Math.abs(parsedAmount), date);
+        if (budgetCheck?.exceeded) {
+          const proceed = await confirmAsync(
+            app,
+            'Budget exceeded',
+            `This category's budget is ${budgetCheck.monthlyLimit.toFixed(2)}/month. You've already spent ${budgetCheck.currentSpend.toFixed(2)} this month — this transaction would bring it to ${budgetCheck.projectedSpend.toFixed(2)}. Record it anyway?`
+          );
+          if (!proceed) {
+            setSubmitting(false);
+            return;
+          }
+        }
+        await moneyService.recordTransaction({
+          date,
+          time,
+          accountId,
+          type,
+          categoryId: categoryId || undefined,
+          amount: -Math.abs(parsedAmount),
+          quantity: quantity ? Number(quantity) : undefined,
+          name: name || undefined,
+          note: note || undefined,
+          essential,
+          judgment: essential === false ? judgment : undefined,
+        });
       } else {
-        const signedAmount =
-          type === 'expense' ? -Math.abs(parsedAmount) : type === 'income' ? Math.abs(parsedAmount) : parsedAmount;
+        const signedAmount = type === 'income' ? Math.abs(parsedAmount) : parsedAmount;
         await moneyService.recordTransaction({
           date,
           time,
@@ -418,6 +448,18 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
         />
       </label>
 
+      {type === 'expense' && !addToShoppingList && (
+        <EssentialJudgmentFields
+          essential={essential}
+          onEssentialChange={(v) => {
+            setEssential(v);
+            if (v) setJudgment(undefined);
+          }}
+          judgment={judgment}
+          onJudgmentChange={setJudgment}
+        />
+      )}
+
       {addToShoppingList && type === 'expense' && (
         <label>
           Due date (optional)
@@ -426,22 +468,20 @@ function TransactionForm({ moneyService, accounts, onCancel, onSaved }: Transact
       )}
 
       {(type === 'expense' || type === 'income') && !addToShoppingList && (
-        <>
-          <label>
-            Name (optional)
-            <input
-              list="ltk-recent-names"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Coffee"
-            />
-            <datalist id="ltk-recent-names">
-              {recentNames.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-          </label>
-        </>
+        <label>
+          Name (optional)
+          <input
+            list="ltk-recent-names"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Coffee"
+          />
+          <datalist id="ltk-recent-names">
+            {recentNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </label>
       )}
 
       {(type === 'expense' || type === 'income' || addToShoppingList) && (
@@ -488,6 +528,7 @@ export class TransactionEntryModal extends Modal {
     this.root.render(
       <ErrorBoundary>
         <TransactionForm
+          app={this.app}
           moneyService={this.moneyService}
           accounts={this.accounts}
           onCancel={() => this.close()}

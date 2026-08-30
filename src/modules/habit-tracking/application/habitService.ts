@@ -1,7 +1,13 @@
 // Orchestrates the domain layer and infrastructure layer into the
 // operations the UI layer calls. No direct file I/O of its own.
+//
+// Update: NewHabitInput/createHabit/updateHabit now carry `levels`
+// through for the new 'levels' habit type (custom user-defined
+// discrete values) — everything else about the flow is unchanged,
+// since logging/streak math already goes through the generic
+// meetsCompletion() gate regardless of type.
 
-import { HabitDefinition, HabitSchedule, HabitTarget, WeekStartsOn, HabitHistoryResult, HabitLogValue, DayClassification } from '../domain/types';
+import { HabitDefinition, HabitSchedule, HabitTarget, HabitLevel, WeekStartsOn, HabitHistoryResult, HabitLogValue, DayClassification } from '../domain/types';
 import { isScheduledOn, classifyDay } from '../domain/scheduleEvaluator';
 import { calculateHabitStats, LoggedDaysLookup } from '../domain/streakCalculator';
 import { meetsCompletion } from '../domain/completion';
@@ -16,6 +22,7 @@ export interface NewHabitInput {
   color: string;
   schedule: HabitSchedule;
   target?: HabitTarget;
+  levels?: HabitLevel[];
 }
 
 export interface CompletedHabitEntry {
@@ -64,6 +71,7 @@ export class HabitService {
       color: input.color,
       schedule: input.schedule,
       target: input.target,
+      levels: input.levels,
       trendVisible: true,
       archived: false,
       createdAt: this.today(),
@@ -96,7 +104,7 @@ export class HabitService {
     await this.logHabit(id, this.today(), value);
   }
 
-  /** Today's raw logged values, keyed by habit id — lets the dashboard show in-progress numeric values (e.g. "3/8 cups") for a habit that's logged but not yet at target, since REQ now gates "completed" on reaching target rather than on any log existing. */
+  /** Today's raw logged values, keyed by habit id — lets the dashboard show in-progress numeric values (e.g. "3/8 cups") or the currently-picked level for a still-pending habit. */
   async getTodayLog(): Promise<Map<string, HabitLogValue>> {
     return this.logFile.readDay(this.today());
   }
@@ -106,10 +114,9 @@ export class HabitService {
     const habits = await this.settingsStore.getAll();
     const todaysLog = await this.logFile.readDay(today);
 
-    // Pending now means "not yet meeting completion" rather than
-    // "nothing logged" — a numeric habit with a target stays pending
-    // (with its partial progress visible) until the value reaches
-    // target, per the resolved completion rule (see domain/completion.ts).
+    // Pending means "not yet meeting completion" — a numeric habit with
+    // a target stays pending until the value reaches target; a 'levels'
+    // habit stays pending until any valid level is logged.
     return habits.filter(
       (h) => !h.archived && isScheduledOn(h, today) && !meetsCompletion(h, todaysLog.get(h.id))
     );
@@ -152,14 +159,41 @@ export class HabitService {
     while (cursor <= today) {
       const value = lookup.getValue(cursor);
       const done = meetsCompletion(habit, value);
-      // Carry the raw logged value alongside the done/missed/not-scheduled
-      // classification — a numeric habit's magnitude (for the heatmap
-      // spectrum and trend chart) is independent of whether it happened
-      // to meet the completion target that day.
       days.push({ date: cursor, status: classifyDay(habit, cursor, done), value });
       cursor = addDaysLocal(cursor, 1);
     }
 
     return { ...stats, days };
+  }
+
+  /**
+   * Daily aggregate commitment across ALL active habits scheduled that
+   * day — for the main Habits view's overall-commitment heatmap
+   * (distinct from a single habit's own detail-view heatmap). For each
+   * day in [rangeStart, today], counts how many non-archived habits
+   * were scheduled and how many of those were actually completed.
+   */
+  async getOverallCommitmentHistory(
+    rangeStart: string
+  ): Promise<{ date: string; doneCount: number; scheduledCount: number }[]> {
+    const today = this.today();
+    const habits = (await this.settingsStore.getAll()).filter((h) => !h.archived);
+    const logged = await this.logFile.readRange(rangeStart, today);
+
+    const results: { date: string; doneCount: number; scheduledCount: number }[] = [];
+    let cursor = rangeStart;
+    while (cursor <= today) {
+      let scheduled = 0;
+      let done = 0;
+      const dayLog = logged.get(cursor);
+      for (const habit of habits) {
+        if (!isScheduledOn(habit, cursor)) continue;
+        scheduled++;
+        if (meetsCompletion(habit, dayLog?.get(habit.id))) done++;
+      }
+      results.push({ date: cursor, doneCount: done, scheduledCount: scheduled });
+      cursor = addDaysLocal(cursor, 1);
+    }
+    return results;
   }
 }

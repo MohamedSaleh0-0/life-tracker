@@ -1,23 +1,24 @@
 // Cross-cutting plugin settings (REQ-C017's "week starts on", and any
 // future cross-cutting toggle) live under their own top-level key in
 // the same settings blob HabitSettingsStore uses for `habits` — same
-// data.json, different key, consistent with PROJECT_PRINCIPLES.md's
-// "definitions/config -> plugin settings" rule.
+// data.json, different key.
 //
-// This is NOT the full cross-cutting settings shell (REQ-C004 module
-// enable/disable, REQ-C006 per-feature toggles) — that's still
-// undesigned. It's just the one setting that was blocking
-// WEEK_STARTS_ON_PLACEHOLDER everywhere. Expand this store (or promote
-// it into that shell) when the rest of the cross-cutting settings get
-// designed, rather than letting each module invent its own.
+// Update: added the overall-commitment heatmap's dim threshold
+// (habitHeatmapDimThresholdPercent) — the % of a day's scheduled
+// habits below which that day renders at the heatmap's dimmest still-
+// colored shade (0 done habits stays uncolored/grey regardless).
+// Defaults to 50, per the user's ask, and is user-configurable in
+// Settings → Habit Tracking.
 
 import { SettingsAdapter } from '../modules/habit-tracking/infrastructure/settingsAdapter';
 import { WeekStartsOn } from '../modules/habit-tracking/domain/types';
 
 const DEFAULT_WEEK_STARTS_ON: WeekStartsOn = 'monday';
+const DEFAULT_HEATMAP_DIM_THRESHOLD_PERCENT = 50;
 
 interface LifeTrackerData {
   weekStartsOn?: WeekStartsOn;
+  habitHeatmapDimThresholdPercent?: number;
   [key: string]: unknown;
 }
 
@@ -32,6 +33,17 @@ export class PluginSettingsStore {
   async setWeekStartsOn(value: WeekStartsOn): Promise<void> {
     const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
     data.weekStartsOn = value;
+    await this.adapter.save(data);
+  }
+
+  async getHeatmapDimThresholdPercent(): Promise<number> {
+    const data = (await this.adapter.load()) as LifeTrackerData | null;
+    return data?.habitHeatmapDimThresholdPercent ?? DEFAULT_HEATMAP_DIM_THRESHOLD_PERCENT;
+  }
+
+  async setHeatmapDimThresholdPercent(value: number): Promise<void> {
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.habitHeatmapDimThresholdPercent = value;
     await this.adapter.save(data);
   }
 }
