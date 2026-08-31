@@ -111,6 +111,52 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
             this.onWeekStartsOnChange(typed);
           })
       );
+
+    const prayerLocation = await this.pluginSettingsStore.getPrayerLocation();
+
+    new Setting(containerEl)
+      .setName('Prayer location (for prayer-relative habit reminders)')
+      .setDesc('Needed only if you use prayer-time-based reminders. Latitude and longitude, plus calculation method.')
+      .addText((t) =>
+        t
+          .setPlaceholder('Latitude')
+          .setValue(prayerLocation ? String(prayerLocation.lat) : '')
+          .onChange(async (v) => {
+            const lat = Number(v);
+            if (Number.isNaN(lat)) return;
+            const cur =
+              (await this.pluginSettingsStore.getPrayerLocation()) ??
+              { lat: 0, lon: 0, calculationMethod: PluginSettingsStore.DEFAULT_CALCULATION_METHOD };
+            await this.pluginSettingsStore.setPrayerLocation({ ...cur, lat });
+          })
+      )
+      .addText((t) =>
+        t
+          .setPlaceholder('Longitude')
+          .setValue(prayerLocation ? String(prayerLocation.lon) : '')
+          .onChange(async (v) => {
+            const lon = Number(v);
+            if (Number.isNaN(lon)) return;
+            const cur =
+              (await this.pluginSettingsStore.getPrayerLocation()) ??
+              { lat: 0, lon: 0, calculationMethod: PluginSettingsStore.DEFAULT_CALCULATION_METHOD };
+            await this.pluginSettingsStore.setPrayerLocation({ ...cur, lon });
+          })
+      )
+      .addDropdown((dd) =>
+        dd
+          .addOption('2', 'ISNA (North America)')
+          .addOption('3', 'Muslim World League')
+          .addOption('4', 'Umm al-Qura (Makkah)')
+          .addOption('5', 'Egyptian General Authority')
+          .setValue(String(prayerLocation?.calculationMethod ?? PluginSettingsStore.DEFAULT_CALCULATION_METHOD))
+          .onChange(async (v) => {
+            const cur =
+              (await this.pluginSettingsStore.getPrayerLocation()) ??
+              { lat: 0, lon: 0, calculationMethod: PluginSettingsStore.DEFAULT_CALCULATION_METHOD };
+            await this.pluginSettingsStore.setPrayerLocation({ ...cur, calculationMethod: Number(v) });
+          })
+      );
   }
 
   // --- Habit Tracking ---

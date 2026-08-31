@@ -15,18 +15,22 @@
 
 import { SettingsAdapter } from '../modules/habit-tracking/infrastructure/settingsAdapter';
 import { WeekStartsOn } from '../modules/habit-tracking/domain/types';
+import { PrayerLocation } from './infrastructure/prayerTimeService';
 
 const DEFAULT_WEEK_STARTS_ON: WeekStartsOn = 'monday';
 const DEFAULT_HEATMAP_DIM_THRESHOLD_PERCENT = 50;
+const DEFAULT_CALCULATION_METHOD = 2; // ISNA
 
 interface LifeTrackerData {
   weekStartsOn?: WeekStartsOn;
   habitHeatmapDimThresholdPercent?: number;
-  prayerLocation?: { lat: number; lon: number; calculationMethod: number };
+  prayerLocation?: PrayerLocation;
   [key: string]: unknown;
 }
 
 export class PluginSettingsStore {
+  static readonly DEFAULT_CALCULATION_METHOD = DEFAULT_CALCULATION_METHOD;
+
   constructor(private adapter: SettingsAdapter) {}
 
   async getWeekStartsOn(): Promise<WeekStartsOn> {
@@ -51,14 +55,14 @@ export class PluginSettingsStore {
     await this.adapter.save(data);
   }
 
-  async getPrayerLocation(): Promise<{ lat: number; lon: number; calculationMethod: number } | null> {
+  async getPrayerLocation(): Promise<PrayerLocation | null> {
     const data = (await this.adapter.load()) as LifeTrackerData | null;
     return data?.prayerLocation ?? null;
   }
 
-  async setPrayerLocation(loc: { lat: number; lon: number; calculationMethod: number }): Promise<void> {
+  async setPrayerLocation(location: PrayerLocation): Promise<void> {
     const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
-    data.prayerLocation = loc;
+    data.prayerLocation = location;
     await this.adapter.save(data);
   }
 }

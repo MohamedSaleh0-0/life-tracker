@@ -1,9 +1,12 @@
-import { Plugin, WorkspaceLeaf, Notice } from 'obsidian';
+import { Plugin, WorkspaceLeaf, Notice, requestUrl } from 'obsidian';
 import { nanoid } from 'nanoid';
 import { ObsidianSettingsAdapter } from './src/core/adapters/obsidianSettingsAdapter';
 import { ObsidianVaultAdapter } from './src/core/adapters/obsidianVaultAdapter';
 import { PluginSettingsStore } from './src/core/pluginSettingsStore';
 import { LifeTrackerSettingsTab } from './src/core/ui/LifeTrackerSettingsTab';
+import { PrayerTimeService, makeObsidianUrlFetcher } from './src/core/infrastructure/prayerTimeService';
+import { ReminderScheduler } from './src/core/application/reminderScheduler';
+import { getTodayLocal } from './src/core/date';
 
 import { HabitSettingsStore } from './src/modules/habit-tracking/infrastructure/habitSettingsStore';
 import { HabitLogFile } from './src/modules/habit-tracking/infrastructure/habitLogFile';
@@ -68,6 +71,40 @@ export default class LifeTrackerPlugin extends Plugin {
       logFile: transactionLogFile,
       idGenerator: () => nanoid(6),
     });
+
+    // --- Habit Reminders ---
+    const prayerTimeService = new PrayerTimeService(makeObsidianUrlFetcher(requestUrl));
+    const reminderScheduler = new ReminderScheduler({
+      prayerService: prayerTimeService,
+      notify: (habit) => {
+        new Notice(`⏰ ${habit.icon} ${habit.name}`, 8000);
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          new Notification(habit.name, { body: 'Time to log this habit.' });
+        } catch {
+          /* mobile / unsupported */
+        }
+      },
+    });
+
+    const rearmReminders = async () => {
+      const habits = await habitSettingsStore.getAll();
+      const prayerLocation = await this.pluginSettingsStore.getPrayerLocation();
+      await reminderScheduler.scheduleAll(habits, prayerLocation);
+      prayerTimeService.pruneCacheExcept(getTodayLocal());
+    };
+
+    await rearmReminders();
+    let lastArmedDate = getTodayLocal();
+    this.registerInterval(
+      window.setInterval(() => {
+        const today = getTodayLocal();
+        if (today !== lastArmedDate) {
+          lastArmedDate = today;
+          rearmReminders();
+        }
+      }, 5 * 60 * 1000)
+    );
 
     // --- Single unified settings tab ---
     this.addSettingTab(

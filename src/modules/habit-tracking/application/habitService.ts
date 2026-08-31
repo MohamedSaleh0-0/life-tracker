@@ -203,4 +203,9 @@ export class HabitService {
   async startNewCommitmentPhase(id: string, date?: string): Promise<HabitDefinition> {
     return this.settingsStore.update(id, { commitmentStartDate: date ?? this.today() });
   }
+
+  /** Clear the commitment phase start date, reverting to original createdAt for streak calculations. */
+  async clearCommitmentPhase(id: string): Promise<HabitDefinition> {
+    return this.settingsStore.update(id, { commitmentStartDate: undefined });
+  }
 }

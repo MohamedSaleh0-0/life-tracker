@@ -317,6 +317,17 @@ export function HabitDetailView({
         <button type="button" onClick={handleStartNewCommitmentPhase}>
           Start new commitment phase
         </button>
+        {habit.commitmentStartDate && (
+          <button
+            type="button"
+            onClick={async () => {
+              await habitService.clearCommitmentPhase(habit.id);
+              onEdited();
+            }}
+          >
+            Clear phase start
+          </button>
+        )}
         <button type="button" onClick={handleArchiveClick}>
           Archive
         </button>

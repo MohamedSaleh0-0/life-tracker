@@ -18,6 +18,15 @@ interface Period {
 
 const addDays = addDaysLocal;
 
+export function streakFloorDate(
+  habit: Pick<HabitDefinition, 'createdAt' | 'commitmentStartDate'>
+): string {
+  if (habit.commitmentStartDate && habit.commitmentStartDate > habit.createdAt) {
+    return habit.commitmentStartDate;
+  }
+  return habit.createdAt;
+}
+
 function buildDailyPeriods(
   habit: HabitDefinition,
   log: LoggedDaysLookup,
@@ -59,7 +68,7 @@ function buildWeeklyQuotaPeriods(
     if (!seenWeekStarts.has(weekStart)) {
       seenWeekStarts.add(weekStart);
 
-      const clampedStart = weekStart < habit.createdAt ? habit.createdAt : weekStart;
+      const clampedStart = weekStart < fromDate ? fromDate : weekStart;
       if (clampedStart <= weekEnd) {
         const clampedEnd = weekEnd > toDate ? toDate : weekEnd;
 
@@ -133,17 +142,15 @@ export function calculateHabitStats(
   rangeStart: string,
   weekStartsOn: WeekStartsOn
 ): HabitStats {
-  const floorDate =
-    habit.commitmentStartDate && habit.commitmentStartDate > habit.createdAt
-      ? habit.commitmentStartDate
-      : habit.createdAt;
+  const floorDate = streakFloorDate(habit);
 
   const fullHistory =
     habit.schedule.mode === 'weeklyQuota'
       ? buildWeeklyQuotaPeriods(habit, log, floorDate, today, weekStartsOn)
       : buildDailyPeriods(habit, log, floorDate, today);
 
-  const rangePeriods = fullHistory.filter((p) => p.date >= rangeStart);
+  const effectiveRangeStart = rangeStart > floorDate ? rangeStart : floorDate;
+  const rangePeriods = fullHistory.filter((p) => p.date >= effectiveRangeStart);
 
   return {
     currentStreak: currentStreakFromPeriods(fullHistory),
