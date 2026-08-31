@@ -15,7 +15,7 @@
 // with no indication of what happened that day.
 
 import React, { useEffect, useState } from 'react';
-import { App } from 'obsidian';
+import { App, Modal } from 'obsidian';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, TooltipProps } from 'recharts';
 import { CalendarHeatmap, HeatmapDay } from '../../../shared/ui-kit/CalendarHeatmap';
 import { HabitService, DeleteRequiresConfirmationError } from '../application/habitService';
@@ -174,6 +174,34 @@ export function HabitDetailView({
     onArchived();
   };
 
+  const handleStartNewCommitmentPhase = async () => {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      const modal = new (class extends Modal {
+        onOpen() {
+          const { contentEl } = this;
+          contentEl.createEl('h2', { text: 'Start new commitment phase?' });
+          contentEl.createEl('p', { text: 'Your streak count will restart from today. Nothing is deleted.' });
+
+          const buttonContainer = contentEl.createEl('div', { cls: 'ltk-modal-buttons' });
+          buttonContainer.createEl('button', { text: 'Cancel' }).onclick = () => {
+            resolve(false);
+            this.close();
+          };
+          buttonContainer.createEl('button', { text: 'Start', cls: 'mod-cta' }).onclick = () => {
+            resolve(true);
+            this.close();
+          };
+        }
+      })(app);
+      modal.open();
+    });
+
+    if (confirmed) {
+      await habitService.startNewCommitmentPhase(habit.id);
+      onEdited();
+    }
+  };
+
   return (
     <div className="ltk-habit-detail">
       <button type="button" className="ltk-back-button" onClick={onBack}>
@@ -285,6 +313,9 @@ export function HabitDetailView({
       <div className="ltk-habit-detail__lifecycle-actions">
         <button type="button" onClick={handleEditClick}>
           Edit
+        </button>
+        <button type="button" onClick={handleStartNewCommitmentPhase}>
+          Start new commitment phase
         </button>
         <button type="button" onClick={handleArchiveClick}>
           Archive

@@ -35,6 +35,12 @@ export type HabitSchedule =
   | { mode: 'weekdays'; days: number[] }
   | { mode: 'weeklyQuota'; timesPerWeek: number };
 
+export type PrayerName = 'fajr' | 'sunrise' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
+
+export type HabitReminder =
+  | { enabled: boolean; mode: 'fixed'; time: string /* HH:MM */ }
+  | { enabled: boolean; mode: 'prayer'; prayer: PrayerName; offsetMinutes: number };
+
 export interface HabitDefinition {
   id: string;
   type: HabitType;
@@ -48,6 +54,9 @@ export interface HabitDefinition {
   archived: boolean;
   createdAt: string;
   order: number;
+  reminder?: HabitReminder;
+  /** A fresh "chapter" for streak purposes — see design-habit-tracking.md §Commitment Phase. */
+  commitmentStartDate?: string;
 }
 
 export type WeekStartsOn = 'monday' | 'saturday' | 'sunday';

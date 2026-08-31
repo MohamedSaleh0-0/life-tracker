@@ -133,10 +133,15 @@ export function calculateHabitStats(
   rangeStart: string,
   weekStartsOn: WeekStartsOn
 ): HabitStats {
+  const floorDate =
+    habit.commitmentStartDate && habit.commitmentStartDate > habit.createdAt
+      ? habit.commitmentStartDate
+      : habit.createdAt;
+
   const fullHistory =
     habit.schedule.mode === 'weeklyQuota'
-      ? buildWeeklyQuotaPeriods(habit, log, habit.createdAt, today, weekStartsOn)
-      : buildDailyPeriods(habit, log, habit.createdAt, today);
+      ? buildWeeklyQuotaPeriods(habit, log, floorDate, today, weekStartsOn)
+      : buildDailyPeriods(habit, log, floorDate, today);
 
   const rangePeriods = fullHistory.filter((p) => p.date >= rangeStart);
 

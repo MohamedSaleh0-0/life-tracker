@@ -9,6 +9,9 @@
 // colored shade (0 done habits stays uncolored/grey regardless).
 // Defaults to 50, per the user's ask, and is user-configurable in
 // Settings → Habit Tracking.
+//
+// Update: added prayerLocation for habit reminders (lat/lon +
+// calculation method from Aladhan API).
 
 import { SettingsAdapter } from '../modules/habit-tracking/infrastructure/settingsAdapter';
 import { WeekStartsOn } from '../modules/habit-tracking/domain/types';
@@ -19,6 +22,7 @@ const DEFAULT_HEATMAP_DIM_THRESHOLD_PERCENT = 50;
 interface LifeTrackerData {
   weekStartsOn?: WeekStartsOn;
   habitHeatmapDimThresholdPercent?: number;
+  prayerLocation?: { lat: number; lon: number; calculationMethod: number };
   [key: string]: unknown;
 }
 
@@ -44,6 +48,17 @@ export class PluginSettingsStore {
   async setHeatmapDimThresholdPercent(value: number): Promise<void> {
     const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
     data.habitHeatmapDimThresholdPercent = value;
+    await this.adapter.save(data);
+  }
+
+  async getPrayerLocation(): Promise<{ lat: number; lon: number; calculationMethod: number } | null> {
+    const data = (await this.adapter.load()) as LifeTrackerData | null;
+    return data?.prayerLocation ?? null;
+  }
+
+  async setPrayerLocation(loc: { lat: number; lon: number; calculationMethod: number }): Promise<void> {
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.prayerLocation = loc;
     await this.adapter.save(data);
   }
 }

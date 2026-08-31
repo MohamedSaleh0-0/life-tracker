@@ -18,7 +18,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { StepWizard, WizardStep, WizardStepProps } from '../../../shared/ui-kit/StepWizard';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { HabitService, NewHabitInput } from '../application/habitService';
-import { HabitDefinition, HabitLevel, HabitSchedule, WeekStartsOn } from '../domain/types';
+import { HabitDefinition, HabitLevel, HabitSchedule, WeekStartsOn, HabitReminder, PrayerName } from '../domain/types';
 import { weekStartInternalIndex } from '../domain/scheduleEvaluator';
 
 function describeSchedule(schedule: HabitSchedule): string {
@@ -142,6 +142,8 @@ interface WizardCtx {
   setLevels: (v: HabitLevel[]) => void;
   schedule: HabitSchedule;
   setSchedule: (v: HabitSchedule) => void;
+  reminder?: HabitReminder;
+  setReminder: (v: HabitReminder | undefined) => void;
   weekStartsOn: WeekStartsOn;
 }
 
@@ -320,10 +322,131 @@ function ReviewStep({ onValidChange }: WizardStepProps) {
   );
 }
 
+function ReminderStep({ onValidChange }: WizardStepProps) {
+  const { reminder, setReminder } = useWizardCtx();
+
+  useEffect(() => {
+    onValidChange(true);
+  }, [onValidChange]);
+
+  const PRAYER_NAMES: PrayerName[] = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
+  const PRAYER_LABELS: Record<PrayerName, string> = {
+    fajr: 'Fajr (Dawn)',
+    sunrise: 'Sunrise',
+    dhuhr: 'Dhuhr (Noon)',
+    asr: 'Asr (Afternoon)',
+    maghrib: 'Maghrib (Sunset)',
+    isha: 'Isha (Night)',
+  };
+
+  return (
+    <div className="ltk-wizard-step">
+      <p className="ltk-empty">Optional: set a reminder notification (fixed time or prayer-relative)</p>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={reminder?.enabled ?? false}
+          onChange={(e) => {
+            if (e.target.checked) {
+              setReminder({ enabled: true, mode: 'fixed', time: '09:00' });
+            } else {
+              setReminder(undefined);
+            }
+          }}
+        />
+        Enable reminder
+      </label>
+
+      {reminder?.enabled && (
+        <>
+          <div className="ltk-wizard-step__reminder-mode">
+            <label>
+              <input
+                type="radio"
+                checked={reminder.mode === 'fixed'}
+                onChange={() => setReminder({ enabled: true, mode: 'fixed', time: reminder.mode === 'fixed' ? reminder.time : '09:00' })}
+              />
+              Fixed time
+            </label>
+            <label>
+              <input
+                type="radio"
+                checked={reminder.mode === 'prayer'}
+                onChange={() =>
+                  setReminder({
+                    enabled: true,
+                    mode: 'prayer',
+                    prayer: reminder.mode === 'prayer' ? reminder.prayer : 'fajr',
+                    offsetMinutes: reminder.mode === 'prayer' ? reminder.offsetMinutes : 0,
+                  })
+                }
+              />
+              Prayer time
+            </label>
+          </div>
+
+          {reminder.mode === 'fixed' && (
+            <label>
+              Time (HH:MM)
+              <input
+                type="time"
+                value={reminder.time}
+                onChange={(e) => setReminder({ enabled: true, mode: 'fixed', time: e.target.value })}
+              />
+            </label>
+          )}
+
+          {reminder.mode === 'prayer' && (
+            <>
+              <label>
+                Prayer
+                <select
+                  value={reminder.prayer}
+                  onChange={(e) =>
+                    setReminder({
+                      enabled: true,
+                      mode: 'prayer',
+                      prayer: e.target.value as PrayerName,
+                      offsetMinutes: reminder.offsetMinutes,
+                    })
+                  }
+                >
+                  {PRAYER_NAMES.map((p) => (
+                    <option key={p} value={p}>
+                      {PRAYER_LABELS[p]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Offset (minutes, negative = before)
+                <input
+                  type="number"
+                  value={reminder.offsetMinutes}
+                  onChange={(e) =>
+                    setReminder({
+                      enabled: true,
+                      mode: 'prayer',
+                      prayer: reminder.prayer,
+                      offsetMinutes: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const WIZARD_STEPS: WizardStep[] = [
   { id: 'name', title: 'Name & look', component: NameStep },
   { id: 'type', title: 'Type', component: TypeStep },
   { id: 'schedule', title: 'Schedule', component: ScheduleStep },
+  { id: 'reminder', title: 'Reminder', component: ReminderStep },
   { id: 'review', title: 'Review', component: ReviewStep },
 ];
 
@@ -348,6 +471,7 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
   const [targetUnit, setTargetUnit] = useState(existingHabit?.target?.unit ?? '');
   const [levels, setLevels] = useState<HabitLevel[]>(existingHabit?.levels ?? []);
   const [schedule, setSchedule] = useState<HabitSchedule>(existingHabit?.schedule ?? { mode: 'daily' });
+  const [reminder, setReminder] = useState<HabitReminder | undefined>(existingHabit?.reminder);
 
   const ctx: WizardCtx = {
     name,
@@ -366,6 +490,8 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
     setLevels,
     schedule,
     setSchedule,
+    reminder,
+    setReminder,
     weekStartsOn,
   };
 
@@ -378,6 +504,7 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
       schedule,
       target: type === 'numeric' && targetValue ? { value: Number(targetValue), unit: targetUnit } : undefined,
       levels: type === 'levels' ? levels.map((l, i) => ({ ...l, label: l.label.trim(), order: i })) : undefined,
+      reminder,
     };
 
     if (existingHabit) {

@@ -7,7 +7,7 @@
 // since logging/streak math already goes through the generic
 // meetsCompletion() gate regardless of type.
 
-import { HabitDefinition, HabitSchedule, HabitTarget, HabitLevel, WeekStartsOn, HabitHistoryResult, HabitLogValue, DayClassification } from '../domain/types';
+import { HabitDefinition, HabitSchedule, HabitTarget, HabitLevel, WeekStartsOn, HabitHistoryResult, HabitLogValue, DayClassification, HabitReminder } from '../domain/types';
 import { isScheduledOn, classifyDay } from '../domain/scheduleEvaluator';
 import { calculateHabitStats, LoggedDaysLookup } from '../domain/streakCalculator';
 import { meetsCompletion } from '../domain/completion';
@@ -23,6 +23,7 @@ export interface NewHabitInput {
   schedule: HabitSchedule;
   target?: HabitTarget;
   levels?: HabitLevel[];
+  reminder?: HabitReminder;
 }
 
 export interface CompletedHabitEntry {
@@ -72,6 +73,7 @@ export class HabitService {
       schedule: input.schedule,
       target: input.target,
       levels: input.levels,
+      reminder: input.reminder,
       trendVisible: true,
       archived: false,
       createdAt: this.today(),
@@ -195,5 +197,10 @@ export class HabitService {
       cursor = addDaysLocal(cursor, 1);
     }
     return results;
+  }
+
+  /** "Start a new chapter" — resets the streak baseline without touching history. Defaults to today; pass a past date to backdate. */
+  async startNewCommitmentPhase(id: string, date?: string): Promise<HabitDefinition> {
+    return this.settingsStore.update(id, { commitmentStartDate: date ?? this.today() });
   }
 }
