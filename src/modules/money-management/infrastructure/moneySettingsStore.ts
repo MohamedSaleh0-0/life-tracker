@@ -1,13 +1,23 @@
 // CRUD for Account[], Category[], ExchangeRates, RecurringEntry[],
-// ShoppingList[]/ShoppingItem[], and CategoryBudget[] against the
+// ShoppingList[]/ShoppingItem[], CategoryBudget[], Debt[], and DebtPayment[] against the
 // plugin's settings blob (REQ-C008), under their own top-level keys —
 // same data.json, separate keys from other modules'. Recurring
-// entries, shopping items, and budgets are definitions/state that
+// entries, shopping items, budgets, and debts are definitions/state that
 // change over time but aren't time-series log data the way
 // transactions are, so per PROJECT_PRINCIPLES.md's storage model they
 // belong in settings, not the markdown log.
 
-import { Account, Category, ExchangeRates, RecurringEntry, ShoppingList, ShoppingItem, CategoryBudget } from '../domain/types';
+import {
+  Account,
+  Category,
+  ExchangeRates,
+  RecurringEntry,
+  ShoppingList,
+  ShoppingItem,
+  CategoryBudget,
+  Debt,
+  DebtPayment,
+} from '../domain/types';
 import { SettingsAdapter } from '../../../core/ports/settingsAdapter';
 
 interface LifeTrackerData {
@@ -18,6 +28,8 @@ interface LifeTrackerData {
   shoppingLists?: ShoppingList[];
   shoppingItems?: ShoppingItem[];
   categoryBudgets?: CategoryBudget[];
+  debts?: Debt[];
+  debtPayments?: DebtPayment[];
   [key: string]: unknown;
 }
 
@@ -245,6 +257,63 @@ export class MoneySettingsStore {
   private async saveCategoryBudgets(budgets: CategoryBudget[]): Promise<void> {
     const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
     data.categoryBudgets = budgets;
+    await this.adapter.save(data);
+  }
+
+  // --- Debts ---
+
+  async getDebts(): Promise<Debt[]> {
+    const data = (await this.adapter.load()) as LifeTrackerData | null;
+    return data?.debts ?? [];
+  }
+
+  async createDebt(debt: Debt): Promise<Debt> {
+    const all = await this.getDebts();
+    all.push(debt);
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.debts = all;
+    await this.adapter.save(data);
+    return debt;
+  }
+
+  async updateDebt(id: string, patch: Partial<Debt>): Promise<Debt> {
+    const all = await this.getDebts();
+    const idx = all.findIndex((d) => d.id === id);
+    if (idx === -1) throw new Error(`Debt not found: ${id}`);
+    all[idx] = { ...all[idx], ...patch, id: all[idx].id };
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.debts = all;
+    await this.adapter.save(data);
+    return all[idx];
+  }
+
+  async deleteDebt(id: string): Promise<void> {
+    const debts = (await this.getDebts()).filter((d) => d.id !== id);
+    const payments = (await this.getDebtPayments()).filter((p) => p.debtId !== id);
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.debts = debts;
+    data.debtPayments = payments;
+    await this.adapter.save(data);
+  }
+
+  async getDebtPayments(): Promise<DebtPayment[]> {
+    const data = (await this.adapter.load()) as LifeTrackerData | null;
+    return data?.debtPayments ?? [];
+  }
+
+  async createDebtPayment(payment: DebtPayment): Promise<DebtPayment> {
+    const all = await this.getDebtPayments();
+    all.push(payment);
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.debtPayments = all;
+    await this.adapter.save(data);
+    return payment;
+  }
+
+  async deleteDebtPayment(id: string): Promise<void> {
+    const remaining = (await this.getDebtPayments()).filter((p) => p.id !== id);
+    const data = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    data.debtPayments = remaining;
     await this.adapter.save(data);
   }
 }

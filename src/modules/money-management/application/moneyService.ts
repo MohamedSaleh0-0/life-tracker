@@ -30,11 +30,15 @@ import {
   CategoryBudget,
   BudgetCheckResult,
   TransactionJudgment,
+  Debt,
+  NewDebtInput,
+  DebtPayment,
 } from '../domain/types';
 import { calculateAccountBalance, calculateIncomeExpenseTotals } from '../domain/balanceCalculator';
 import { convertToPrimary } from '../domain/currencyConverter';
 import { buildCategoryTree, CategoryNode, resolveCategoryLabel } from '../domain/categoryTree';
 import { isRecurringEntryDue } from '../domain/recurringDueCalculator';
+import { debtRemaining, totalsByDirection } from '../domain/debtCalculator';
 import { MoneySettingsStore } from '../infrastructure/moneySettingsStore';
 import { TransactionLogFile, RawTransaction } from '../infrastructure/transactionLogFile';
 import { getTodayLocal, monthBoundsFor } from '../../../core/date';
@@ -354,9 +358,19 @@ export class MoneyService {
    * live, so there's no separate "recalculate" step needed after this.
    * REQ-M034: if this transaction was auto-created from a shopping
    * purchase, the source item reverts to pending.
+   * A transfer's two legs must live or die together (REQ-M002/M003 integrity) —
+   * deleting only one previously left the other orphaned with wrong balance math.
    */
   async deleteTransaction(date: string, id: string): Promise<void> {
+    const existing = await this.logFile.findTransaction(date, id);
     await this.logFile.deleteTransaction(date, id);
+
+    // A transfer's two legs must live or die together.
+    if (existing?.transferPairId) {
+      const day = await this.logFile.readDay(date);
+      const otherLeg = day.find((t) => t.transferPairId === existing.transferPairId && t.id !== id);
+      if (otherLeg) await this.logFile.deleteTransaction(date, otherLeg.id);
+    }
 
     const items = await this.settingsStore.getShoppingItems();
     const linkedItem = items.find((i) => i.transactionId === id);
@@ -384,6 +398,43 @@ export class MoneyService {
 
   async unarchiveTransaction(date: string, id: string): Promise<void> {
     await this.logFile.setArchived(date, id, false);
+  }
+
+  /**
+   * Edits a transaction's editable fields in place. Deliberately excludes
+   * `date` and `type` — moving across year files or switching
+   * expense/income/transfer/adjustment would break the invariants those
+   * fields carry (transfer legs, shopping-item linkage). Use delete +
+   * re-record for those cases.
+   */
+  async updateTransaction(
+    date: string,
+    id: string,
+    patch: {
+      accountId?: string;
+      categoryId?: string;
+      amount?: number;
+      quantity?: number;
+      name?: string;
+      note?: string;
+      time?: string;
+    }
+  ): Promise<Transaction> {
+    const existing = await this.logFile.findTransaction(date, id);
+    if (!existing) throw new Error(`Transaction not found: ${id} on ${date}`);
+
+    await this.logFile.updateFields(date, id, {
+      ...(patch.accountId !== undefined && { accountId: patch.accountId }),
+      ...(patch.categoryId !== undefined && { categoryId: patch.categoryId ?? '' }),
+      ...(patch.amount !== undefined && { amount: String(patch.amount) }),
+      ...(patch.quantity !== undefined && { quantity: patch.quantity !== undefined ? String(patch.quantity) : '' }),
+      ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.note !== undefined && { note: patch.note }),
+      ...(patch.time !== undefined && { time: patch.time }),
+    });
+
+    const updated = await this.logFile.findTransaction(date, id);
+    return toDomainTransaction(updated!);
   }
 
   /**
@@ -678,6 +729,133 @@ export class MoneyService {
     });
 
     return tx;
+  }
+
+  /** Previously-used shopping item names, most recent first, deduplicated. */
+  async getRecentItemNames(limit = 20): Promise<string[]> {
+    const all = await this.settingsStore.getShoppingItems();
+    const seen = new Set<string>();
+    const names: string[] = [];
+    const sorted = [...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    for (const i of sorted) {
+      if (!i.name || seen.has(i.name)) continue;
+      seen.add(i.name);
+      names.push(i.name);
+      if (names.length >= limit) break;
+    }
+    return names;
+  }
+
+  async updateShoppingItemDetails(id: string, patch: Partial<NewShoppingItemInput>): Promise<ShoppingItem> {
+    return this.settingsStore.updateShoppingItem(id, patch);
+  }
+
+  // --- Debts ---
+
+  async createDebt(input: NewDebtInput): Promise<Debt> {
+    const existing = await this.settingsStore.getDebts();
+    const debt: Debt = {
+      id: this.idGenerator(),
+      ...input,
+      archived: false,
+      createdAt: this.today(),
+      order: existing.length,
+    };
+    return this.settingsStore.createDebt(debt);
+  }
+
+  async updateDebt(id: string, patch: Partial<Debt>): Promise<Debt> {
+    return this.settingsStore.updateDebt(id, patch);
+  }
+
+  async archiveDebt(id: string): Promise<void> {
+    await this.settingsStore.updateDebt(id, { archived: true });
+  }
+
+  async deleteDebt(id: string): Promise<void> {
+    await this.settingsStore.deleteDebt(id);
+  }
+
+  async getDebts(): Promise<Debt[]> {
+    const all = await this.settingsStore.getDebts();
+    return all.filter((d) => !d.archived).sort((a, b) => a.order - b.order);
+  }
+
+  async getDebtPayments(debtId: string): Promise<DebtPayment[]> {
+    const all = await this.settingsStore.getDebtPayments();
+    return all.filter((p) => p.debtId === debtId).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Records a payment against a debt. If `accountId` is provided, also
+   * creates a real linked transaction (income if money owed to you came
+   * in; expense if you paid down what you owe) — same REQ-M004 invariant
+   * as shopping purchases: real money movement always goes through a
+   * transaction. Omit accountId to log an untracked payment (e.g. cash
+   * outside any tracked account).
+   */
+  async recordDebtPayment(
+    debtId: string,
+    input: { amount: number; date: string; accountId?: string; categoryId?: string; note?: string }
+  ): Promise<DebtPayment> {
+    const debt = (await this.settingsStore.getDebts()).find((d) => d.id === debtId);
+    if (!debt) throw new Error(`Debt not found: ${debtId}`);
+
+    let transactionId: string | undefined;
+    if (input.accountId) {
+      const tx = await this.recordTransaction({
+        date: input.date,
+        accountId: input.accountId,
+        type: debt.direction === 'owed_to_me' ? 'income' : 'expense',
+        categoryId: input.categoryId,
+        amount: debt.direction === 'owed_to_me' ? Math.abs(input.amount) : -Math.abs(input.amount),
+        name: `${debt.direction === 'owed_to_me' ? 'Repayment from' : 'Payment to'} ${debt.counterparty}`,
+        note: input.note,
+      });
+      transactionId = tx.id;
+    }
+
+    const payment: DebtPayment = {
+      id: this.idGenerator(),
+      debtId,
+      amount: Math.abs(input.amount),
+      date: input.date,
+      accountId: input.accountId,
+      transactionId,
+      note: input.note,
+    };
+    return this.settingsStore.createDebtPayment(payment);
+  }
+
+  /**
+   * Deletes a payment; if it had a linked transaction, deletes that too
+   * (same cascade principle as the transfer-leg fix above).
+   */
+  async deleteDebtPayment(paymentId: string): Promise<void> {
+    const payments = await this.settingsStore.getDebtPayments();
+    const payment = payments.find((p) => p.id === paymentId);
+    if (payment?.transactionId) {
+      await this.deleteTransaction(payment.date, payment.transactionId);
+    }
+    await this.settingsStore.deleteDebtPayment(paymentId);
+  }
+
+  /** Computes total debts by direction for a dashboard summary. */
+  async getDebtTotals(): Promise<{ owedToMe: number; iOwe: number }> {
+    const [debts, payments] = await Promise.all([
+      this.settingsStore.getDebts(),
+      this.settingsStore.getDebtPayments(),
+    ]);
+    return totalsByDirection(debts, payments);
+  }
+
+  /** Remaining balance on a single debt. */
+  async getDebtRemaining(debtId: string): Promise<number> {
+    const debts = await this.settingsStore.getDebts();
+    const debt = debts.find((d) => d.id === debtId);
+    if (!debt) throw new Error(`Debt not found: ${debtId}`);
+    const payments = await this.settingsStore.getDebtPayments();
+    return debtRemaining(debt, payments);
   }
 }
 

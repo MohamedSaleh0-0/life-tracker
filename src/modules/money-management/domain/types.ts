@@ -228,3 +228,37 @@ export const JUDGMENT_OPTIONS: { value: TransactionJudgment; label: string }[] =
   { value: 'childish', label: 'Childish' },
   { value: 'wasted', label: 'Wasted Money' },
 ];
+
+// --- Debt Management ---
+
+export type DebtDirection = 'owed_to_me' | 'i_owe';
+
+export interface Debt {
+  id: string;
+  direction: DebtDirection;
+  counterparty: string; // person/entity name
+  principal: number; // original amount, always positive
+  createdAt: string;
+  dueDate?: string;
+  note?: string;
+  archived: boolean;
+  order: number;
+}
+
+export interface NewDebtInput {
+  direction: DebtDirection;
+  counterparty: string;
+  principal: number;
+  dueDate?: string;
+  note?: string;
+}
+
+export interface DebtPayment {
+  id: string;
+  debtId: string;
+  amount: number; // positive, partial or full
+  date: string;
+  accountId?: string; // present -> creates a linked transaction
+  transactionId?: string; // traceability, same pattern as shopping purchases
+  note?: string;
+}
