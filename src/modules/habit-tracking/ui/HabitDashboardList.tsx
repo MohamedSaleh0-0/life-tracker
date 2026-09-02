@@ -19,10 +19,12 @@
 import React, { useEffect, useState } from 'react';
 import { HabitService, CompletedHabitEntry } from '../application/habitService';
 import { HabitDefinition, HabitLogValue } from '../domain/types';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 export interface HabitDashboardListProps {
   habitService: HabitService;
   onOpenDetail: (habit: HabitDefinition) => void;
+  pluginSettingsStore?: PluginSettingsStore;
 }
 
 function levelLabel(habit: HabitDefinition, levelId: string): string {
@@ -44,10 +46,12 @@ function formatValue(habit: HabitDefinition, value: HabitLogValue): string {
 function NumericStepper({
   habit,
   initialValue,
+  stepIncrement = 1,
   onSubmit,
 }: {
   habit: HabitDefinition;
   initialValue: number;
+  stepIncrement?: number;
   onSubmit: (value: number) => void;
 }) {
   const [value, setValue] = useState(initialValue);
@@ -60,9 +64,9 @@ function NumericStepper({
     onSubmit(clamped);
   };
 
-  const step = (e: React.MouseEvent, delta: number) => {
+  const step = (e: React.MouseEvent, direction: number) => {
     e.stopPropagation();
-    commitValue(value + delta);
+    commitValue(value + direction * stepIncrement);
   };
 
   const commitTyped = () => {
@@ -128,22 +132,49 @@ function LevelPicker({
   );
 }
 
-export function HabitDashboardList({ habitService, onOpenDetail }: HabitDashboardListProps) {
+export function HabitDashboardList({ habitService, onOpenDetail, pluginSettingsStore }: HabitDashboardListProps) {
   const [pending, setPending] = useState<HabitDefinition[]>([]);
   const [completed, setCompleted] = useState<CompletedHabitEntry[]>([]);
   const [todayLog, setTodayLog] = useState<Map<string, HabitLogValue>>(new Map());
+  const [stepperIncrement, setStepperIncrement] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const refresh = async () => {
-    setPending(await habitService.getPendingForToday());
-    setCompleted(await habitService.getCompletedForToday());
-    setTodayLog(await habitService.getTodayLog());
+    const [p, c, tl] = await Promise.all([
+      habitService.getPendingForToday(),
+      habitService.getCompletedForToday(),
+      habitService.getTodayLog(),
+    ]);
+    setPending(p);
+    setCompleted(c);
+    setTodayLog(tl);
   };
 
   useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const [p, c, tl] = await Promise.all([
+        habitService.getPendingForToday(),
+        habitService.getCompletedForToday(),
+        habitService.getTodayLog(),
+      ]);
+      if (!cancelled) {
+        setPending(p);
+        setCompleted(c);
+        setTodayLog(tl);
+      }
+    })();
+
+    if (pluginSettingsStore) {
+      pluginSettingsStore.getHabitStepperIncrement().then((inc) => {
+        if (!cancelled) setStepperIncrement(inc);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [habitService, pluginSettingsStore]);
 
   const handleBooleanComplete = async (habit: HabitDefinition) => {
     await habitService.editTodayLog(habit.id, true);
@@ -196,6 +227,7 @@ export function HabitDashboardList({ habitService, onOpenDetail }: HabitDashboar
                 <NumericStepper
                   habit={habit}
                   initialValue={currentValue}
+                  stepIncrement={stepperIncrement}
                   onSubmit={(value) => handleNumericSubmit(habit, value)}
                 />
               )}
@@ -221,6 +253,7 @@ export function HabitDashboardList({ habitService, onOpenDetail }: HabitDashboar
               <NumericStepper
                 habit={habit}
                 initialValue={typeof value === 'number' ? value : 0}
+                stepIncrement={stepperIncrement}
                 onSubmit={(v) => handleNumericSubmit(habit, v)}
               />
             )}

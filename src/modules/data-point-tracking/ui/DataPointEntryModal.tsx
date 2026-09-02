@@ -15,7 +15,7 @@
 // - Duration type reuses the existing time/value fields as Start/End
 //   time: `time` = activity start, `value` = activity end.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
@@ -23,6 +23,7 @@ import { ClockPicker } from '../../../shared/ui-kit/ClockPicker';
 import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition, DataPointEntry } from '../domain/types';
 import { getTodayLocal } from '../../../core/date';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 function nowHHMM(): string {
   const now = new Date();
@@ -37,17 +38,33 @@ interface EntryFormProps {
   existingEntry?: DataPointEntry;
   onCancel: () => void;
   onSaved: () => void;
+  pluginSettingsStore?: PluginSettingsStore;
 }
 
-function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSaved }: EntryFormProps) {
+function EntryForm({
+  definition,
+  dataPointService,
+  existingEntry,
+  onCancel,
+  onSaved,
+  pluginSettingsStore,
+}: EntryFormProps) {
   const [date, setDate] = useState(existingEntry?.date ?? getTodayLocal());
   const [time, setTime] = useState(existingEntry?.time ?? nowHHMM());
-  const [value, setValue] = useState(existingEntry ? String(existingEntry.value) : '');
+  const [value, setValue] = useState(existingEntry ? String(existingEntry.value) : '1');
+  const [snapMinutes, setSnapMinutes] = useState(5);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (pluginSettingsStore) {
+      pluginSettingsStore.getClockSnapMinutes().then(setSnapMinutes);
+    }
+  }, [pluginSettingsStore]);
+
   const isDuration = definition.type === 'duration';
   const isTimeOfDay = definition.type === 'time';
+  const isBinary = definition.type === 'binary';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,9 +72,15 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
     setError(null);
     try {
       if (existingEntry) {
-        await dataPointService.editEntry(existingEntry.id, definition.id, existingEntry.date, time, value);
+        await dataPointService.editEntry(
+          existingEntry.id,
+          definition.id,
+          existingEntry.date,
+          time,
+          isBinary ? '1' : value
+        );
       } else {
-        await dataPointService.logEntry(definition.id, date, time, value);
+        await dataPointService.logEntry(definition.id, date, time, isBinary ? '1' : value);
       }
       onSaved();
     } catch (err) {
@@ -87,6 +110,7 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
             mode="range"
             startValue={time || '22:00'}
             endValue={value || '06:00'}
+            snapMinutes={snapMinutes}
             onChange={(start, end) => {
               setTime(start);
               setValue(end);
@@ -97,13 +121,23 @@ function EntryForm({ definition, dataPointService, existingEntry, onCancel, onSa
       ) : isTimeOfDay ? (
         <>
           <div className="ltk-clock-field">
-            <ClockPicker mode="single" value={value || time || nowHHMM()} onChange={(v) => setValue(v)} />
+            <ClockPicker
+              mode="single"
+              value={value || time || nowHHMM()}
+              snapMinutes={snapMinutes}
+              onChange={(v) => setValue(v)}
+            />
           </div>
           <label>
             Logged at (optional, defaults to now)
             <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
           </label>
         </>
+      ) : isBinary ? (
+        <label>
+          Logged at
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+        </label>
       ) : (
         <>
           <label>
@@ -148,7 +182,8 @@ export class DataPointEntryModal extends Modal {
     private dataPointService: DataPointService,
     private definition: DataPointDefinition,
     private existingEntry: DataPointEntry | undefined,
-    private onSaved: () => void
+    private onSaved: () => void,
+    private pluginSettingsStore?: PluginSettingsStore
   ) {
     super(app);
   }
@@ -162,6 +197,7 @@ export class DataPointEntryModal extends Modal {
           definition={this.definition}
           dataPointService={this.dataPointService}
           existingEntry={this.existingEntry}
+          pluginSettingsStore={this.pluginSettingsStore}
           onCancel={() => this.close()}
           onSaved={() => {
             this.onSaved();

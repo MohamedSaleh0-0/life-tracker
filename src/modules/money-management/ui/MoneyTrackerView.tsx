@@ -35,9 +35,13 @@ import { ShoppingListModal } from './ShoppingListModal';
 import { ShoppingListDetailModal } from './ShoppingListDetailModal';
 import { ShoppingItemModal } from './ShoppingItemModal';
 import { TransactionTagsModal } from './TransactionTagsModal';
+import { DebtModal } from './DebtModal';
+import { DebtDetailModal } from './DebtDetailModal';
 import { MoneyService, AccountWithBalance } from '../application/moneyService';
-import { Account, RecurringEntry, ShoppingList, Transaction, JUDGMENT_OPTIONS } from '../domain/types';
+import { Account, RecurringEntry, ShoppingList, Transaction, JUDGMENT_OPTIONS, Debt } from '../domain/types';
+import { debtRemaining } from '../domain/debtCalculator';
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 export const VIEW_TYPE_MONEY_TRACKER = 'life-tracker-money';
 
@@ -53,9 +57,10 @@ function formatAmount(amount: number, currency: string): string {
 interface MoneyTrackerRootProps {
   view: MoneyTrackerView;
   moneyService: MoneyService;
+  pluginSettingsStore?: PluginSettingsStore;
 }
 
-function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
+function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrackerRootProps) {
   const [accountsWithBalances, setAccountsWithBalances] = useState<AccountWithBalance[]>([]);
   const [netWorth, setNetWorth] = useState<{ total: number; excludedAccounts: Account[] } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -66,6 +71,9 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
   const [dueRecurring, setDueRecurring] = useState<RecurringEntry[]>([]);
   const [shoppingLists, setShoppingLists] = useState<ShoppingList[]>([]);
   const [shoppingSummaries, setShoppingSummaries] = useState<Map<string, { pendingCount: number; estimatedTotal: number }>>(new Map());
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [debtTotals, setDebtTotals] = useState<{ owedToMe: number; iOwe: number }>({ owedToMe: 0, iOwe: 0 });
+  const [debtRemainingById, setDebtRemainingById] = useState<Map<string, number>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
@@ -77,16 +85,16 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
   useEffect(() => {
     view.registerRefreshHandler(refresh);
     return () => view.registerRefreshHandler(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const rangeStart = addDaysLocal(getTodayLocal(), -30);
+        const windowDays = pluginSettingsStore ? await pluginSettingsStore.getRecentTransactionsWindowDays() : 30;
+        const rangeStart = addDaysLocal(getTodayLocal(), -windowDays);
         const rangeEnd = getTodayLocal();
-        const [withBalances, worth, rates, recentTxs, archivedTxs, due, lists] = await Promise.all([
+        const [withBalances, worth, rates, recentTxs, archivedTxs, due, lists, allDebts] = await Promise.all([
           moneyService.getAccountsWithBalances(),
           moneyService.getNetWorth(),
           moneyService.getExchangeRates(),
@@ -94,6 +102,7 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
           moneyService.getArchivedTransactions(rangeStart, rangeEnd),
           moneyService.getDueRecurringEntries(),
           moneyService.getShoppingLists(),
+          moneyService.getDebts(),
         ]);
         if (cancelled) return;
 
@@ -106,6 +115,22 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
         setArchivedTransactions(archivedTxs.slice(0, 25));
         setDueRecurring(due);
         setShoppingLists(lists);
+        setDebts(allDebts);
+
+        const remainingMap = new Map<string, number>();
+        let owedToMe = 0;
+        let iOwe = 0;
+        for (const debt of allDebts) {
+          const payments = await moneyService.getDebtPayments(debt.id);
+          const remaining = debtRemaining(debt, payments);
+          remainingMap.set(debt.id, remaining);
+          if (debt.direction === 'owed_to_me') owedToMe += remaining;
+          else iOwe += remaining;
+        }
+        if (!cancelled) {
+          setDebtRemainingById(remainingMap);
+          setDebtTotals({ owedToMe, iOwe });
+        }
 
         const summaries = new Map<string, { pendingCount: number; estimatedTotal: number }>();
         for (const list of lists) {
@@ -129,7 +154,7 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, moneyService]);
+  }, [refreshKey, moneyService, pluginSettingsStore]);
 
   const accounts = accountsWithBalances.map((w) => w.account);
 
@@ -139,7 +164,7 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
     // otherwise stayed disabled (or opened with an empty account list)
     // right after creating the first account elsewhere.
     const freshAccounts = await moneyService.getAccounts();
-    new TransactionEntryModal(view.app, moneyService, freshAccounts, refresh).open();
+    new TransactionEntryModal(view.app, moneyService, freshAccounts, refresh, pluginSettingsStore).open();
   };
 
   const handleArchiveTransaction = async (t: Transaction) => {
@@ -246,7 +271,10 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
           {dueRecurring.map((entry) => (
             <div key={entry.id} className="ltk-money-due__row">
               <span className="ltk-money-due__name">{entry.name}</span>
-              <span className="ltk-money-due__amount">{entry.type === 'expense' ? '-' : '+'}{entry.amount}</span>
+              <span className="ltk-money-due__amount">
+                {entry.type === 'expense' ? '-' : '+'}
+                {entry.amount}
+              </span>
               <button type="button" onClick={() => handleLogRecurring(entry)}>
                 Log
               </button>
@@ -320,6 +348,44 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
       )}
 
       <div className="ltk-money-section-header">
+        <h3>Debts</h3>
+        <button type="button" onClick={() => new DebtModal(view.app, moneyService, undefined, refresh).open()}>
+          + New debt
+        </button>
+      </div>
+      {(debtTotals.owedToMe > 0 || debtTotals.iOwe > 0) && (
+        <div className="ltk-money-networth">
+          <span className="ltk-money-networth__label">Owed to you</span>
+          <span className="ltk-money-networth__value">{debtTotals.owedToMe.toFixed(2)}</span>
+          <span className="ltk-money-networth__label">You owe</span>
+          <span className="ltk-money-networth__value">{debtTotals.iOwe.toFixed(2)}</span>
+        </div>
+      )}
+      {debts.length === 0 && <p className="ltk-empty">No debts tracked.</p>}
+      {debts.length > 0 && (
+        <div className="ltk-shopping-lists">
+          {debts.map((debt) => {
+            const remaining = debtRemainingById.get(debt.id) ?? debt.principal;
+            return (
+              <div
+                key={debt.id}
+                className="ltk-shopping-list-card"
+                onClick={() => new DebtDetailModal(view.app, moneyService, debt, accounts, refresh).open()}
+              >
+                <span className="ltk-shopping-list-card__name">
+                  {debt.direction === 'owed_to_me' ? '← ' : '→ '}
+                  {debt.counterparty}
+                </span>
+                <span className="ltk-shopping-list-card__summary">
+                  {remaining <= 0 ? 'Settled' : `${remaining.toFixed(2)} remaining`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="ltk-money-section-header">
         <h3>{showArchived ? 'Archived transactions' : 'Recent transactions'}</h3>
         <button type="button" onClick={() => setShowArchived((v) => !v)}>
           {showArchived ? 'Show recent' : 'Show archived'}
@@ -335,7 +401,7 @@ function MoneyTrackerRoot({ view, moneyService }: MoneyTrackerRootProps) {
         </>
       ) : (
         <>
-          {transactions.length === 0 && <p className="ltk-empty">No transactions in the last 30 days.</p>}
+          {transactions.length === 0 && <p className="ltk-empty">No transactions in this window.</p>}
           {transactions.length > 0 && (
             <ul className="ltk-money-transactions">{transactions.map((t) => renderTransactionRow(t, false))}</ul>
           )}
@@ -351,7 +417,8 @@ export class MoneyTrackerView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private moneyService: MoneyService
+    private moneyService: MoneyService,
+    private pluginSettingsStore?: PluginSettingsStore
   ) {
     super(leaf);
   }
@@ -377,17 +444,14 @@ export class MoneyTrackerView extends ItemView {
     this.root = createRoot(this.contentEl);
     this.root.render(
       <ErrorBoundary>
-        <MoneyTrackerRoot view={this} moneyService={this.moneyService} />
+        <MoneyTrackerRoot
+          view={this}
+          moneyService={this.moneyService}
+          pluginSettingsStore={this.pluginSettingsStore}
+        />
       </ErrorBoundary>
     );
 
-    // Re-fetch every time this leaf becomes active again — covers both
-    // "I edited accounts/categories in Settings, then switched back to
-    // this already-open tab" and "I closed this pane and reopened it"
-    // (Obsidian reuses the existing leaf rather than remounting it, so
-    // onOpen() alone only fires once per leaf's lifetime). The header's
-    // manual Refresh button covers everything else (e.g. logging a
-    // transaction via the command palette while this pane stays active).
     this.registerEvent(
       this.app.workspace.on('active-leaf-change', (leaf) => {
         if (leaf === this.leaf) {

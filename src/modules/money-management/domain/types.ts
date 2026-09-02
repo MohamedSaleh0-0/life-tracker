@@ -10,6 +10,8 @@
 // is recorded, so overspending triggers a warning instead of silently
 // going through.
 
+export type { CategoryNode } from './categoryTree';
+
 export interface Account {
   id: string;
   name: string;

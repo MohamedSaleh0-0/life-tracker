@@ -48,6 +48,7 @@ export interface MoneyServiceDeps {
   logFile: TransactionLogFile;
   idGenerator: () => string;
   clock?: () => Date;
+  getRecentNamesLimit?: () => Promise<number>;
 }
 
 export interface AccountWithBalance {
@@ -62,6 +63,7 @@ export class MoneyService {
   private logFile: TransactionLogFile;
   private idGenerator: () => string;
   private clock: () => Date;
+  private getRecentNamesLimit: () => Promise<number>;
   /** In-memory only (not persisted) — REQ-M010's "within the current session" scope. */
   private lastRecorded: { date: string; ids: string[] } | null = null;
 
@@ -70,6 +72,7 @@ export class MoneyService {
     this.logFile = deps.logFile;
     this.idGenerator = deps.idGenerator;
     this.clock = deps.clock ?? (() => new Date());
+    this.getRecentNamesLimit = deps.getRecentNamesLimit ?? (async () => 20);
   }
 
   private today(): string {
@@ -190,7 +193,8 @@ export class MoneyService {
   async removeCurrencyRate(currency: string): Promise<void> {
     const rates = await this.settingsStore.getExchangeRates();
     if (currency === rates.primaryCurrency) return; // the primary currency isn't a "rate" to remove
-    const { [currency]: _removed, ...rest } = rates.ratesToPrimary;
+    const rest = { ...rates.ratesToPrimary };
+    delete rest[currency];
     await this.settingsStore.setExchangeRates({ ...rates, ratesToPrimary: rest });
   }
 
@@ -261,7 +265,11 @@ export class MoneyService {
    * separate step the UI takes afterward regardless of the result;
    * this never blocks anything on its own.
    */
-  async checkBudget(categoryId: string | undefined, additionalAmount: number, date: string): Promise<BudgetCheckResult | null> {
+  async checkBudget(
+    categoryId: string | undefined,
+    additionalAmount: number,
+    date: string
+  ): Promise<BudgetCheckResult | null> {
     if (!categoryId) return null;
     const budgets = await this.settingsStore.getCategoryBudgets();
     const budget = budgets.find((b) => b.categoryId === categoryId);
@@ -529,7 +537,8 @@ export class MoneyService {
   }
 
   /** REQ-M009: previously-used transaction names, for autocomplete on new entries — most recent first, deduplicated. */
-  async getRecentNames(limit = 20): Promise<string[]> {
+  async getRecentNames(limit?: number): Promise<string[]> {
+    const effectiveLimit = limit ?? (await this.getRecentNamesLimit());
     const all = await this.logFile.readAll();
     const seen = new Set<string>();
     const names: string[] = [];
@@ -538,7 +547,7 @@ export class MoneyService {
       if (!t.name || seen.has(t.name)) continue;
       seen.add(t.name);
       names.push(t.name);
-      if (names.length >= limit) break;
+      if (names.length >= effectiveLimit) break;
     }
     return names;
   }
@@ -732,7 +741,8 @@ export class MoneyService {
   }
 
   /** Previously-used shopping item names, most recent first, deduplicated. */
-  async getRecentItemNames(limit = 20): Promise<string[]> {
+  async getRecentItemNames(limit?: number): Promise<string[]> {
+    const effectiveLimit = limit ?? (await this.getRecentNamesLimit());
     const all = await this.settingsStore.getShoppingItems();
     const seen = new Set<string>();
     const names: string[] = [];
@@ -741,7 +751,7 @@ export class MoneyService {
       if (!i.name || seen.has(i.name)) continue;
       seen.add(i.name);
       names.push(i.name);
-      if (names.length >= limit) break;
+      if (names.length >= effectiveLimit) break;
     }
     return names;
   }

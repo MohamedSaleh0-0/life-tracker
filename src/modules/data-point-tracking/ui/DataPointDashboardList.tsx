@@ -10,14 +10,25 @@ import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition, DataPointEntry } from '../domain/types';
 import { DataPointEntryModal } from './DataPointEntryModal';
 import { computeDurationMinutes, formatDurationMinutes } from '../domain/duration';
+import { getTodayLocal } from '../../../core/date';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 export interface DataPointDashboardListProps {
   app: App;
   dataPointService: DataPointService;
   onOpenDetail: (dataPoint: DataPointDefinition) => void;
+  pluginSettingsStore?: PluginSettingsStore;
+}
+
+function nowHHMM(): string {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
 }
 
 function formatEntryValue(definition: DataPointDefinition, entry: DataPointEntry): string {
+  if (definition.type === 'binary') return '✓ occurred';
   if (definition.type === 'number') {
     return definition.unit ? `${entry.value} ${definition.unit}` : String(entry.value);
   }
@@ -28,26 +39,51 @@ function formatEntryValue(definition: DataPointDefinition, entry: DataPointEntry
   return String(entry.value);
 }
 
-export function DataPointDashboardList({ app, dataPointService, onOpenDetail }: DataPointDashboardListProps) {
+export function DataPointDashboardList({
+  app,
+  dataPointService,
+  onOpenDetail,
+  pluginSettingsStore,
+}: DataPointDashboardListProps) {
   const [dataPoints, setDataPoints] = useState<DataPointDefinition[]>([]);
   const [entriesByDp, setEntriesByDp] = useState<Map<string, DataPointEntry[]>>(new Map());
 
   const refresh = async () => {
-    setDataPoints(await dataPointService.getActiveDataPoints());
-    setEntriesByDp(await dataPointService.getEntriesForToday());
+    const [active, todayEntries] = await Promise.all([
+      dataPointService.getActiveDataPoints(),
+      dataPointService.getEntriesForToday(),
+    ]);
+    setDataPoints(active);
+    setEntriesByDp(todayEntries);
   };
 
   useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const [active, todayEntries] = await Promise.all([
+        dataPointService.getActiveDataPoints(),
+        dataPointService.getEntriesForToday(),
+      ]);
+      if (!cancelled) {
+        setDataPoints(active);
+        setEntriesByDp(todayEntries);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataPointService]);
 
   const openAdd = (dp: DataPointDefinition) => {
-    new DataPointEntryModal(app, dataPointService, dp, undefined, refresh).open();
+    if (dp.type === 'binary') {
+      dataPointService.logOccurrence(dp.id, getTodayLocal(), nowHHMM()).then(refresh);
+      return;
+    }
+    new DataPointEntryModal(app, dataPointService, dp, undefined, refresh, pluginSettingsStore).open();
   };
 
   const openEdit = (dp: DataPointDefinition, entry: DataPointEntry) => {
-    new DataPointEntryModal(app, dataPointService, dp, entry, refresh).open();
+    new DataPointEntryModal(app, dataPointService, dp, entry, refresh, pluginSettingsStore).open();
   };
 
   const handleDelete = async (entry: DataPointEntry) => {

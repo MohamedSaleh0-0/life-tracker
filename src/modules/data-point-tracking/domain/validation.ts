@@ -1,6 +1,4 @@
-// Pure validation: does a raw string input match a data point's type
-// (REQ-D009 — reject non-numeric text for a number data point, etc.).
-// No I/O.
+// Pure validation: does a raw string input match a data point's type.
 
 import { DataPointType, DataPointLogValue } from './types';
 
@@ -12,6 +10,10 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 export function validateEntryValue(type: DataPointType, raw: string): ValidationResult {
   const trimmed = raw.trim();
+
+  if (type === 'binary') {
+    return { valid: true, value: 1 };
+  }
 
   if (type === 'number') {
     if (trimmed === '') return { valid: false, error: 'Enter a number.' };
@@ -26,9 +28,6 @@ export function validateEntryValue(type: DataPointType, raw: string): Validation
   }
 
   if (type === 'duration') {
-    // The validated value is the activity's end time; its start time
-    // lives in the entry's separate `time` field, validated by the UI
-    // the same way any HH:MM input is.
     if (!TIME_RE.test(trimmed)) return { valid: false, error: 'Enter an end time as HH:MM (24-hour).' };
     return { valid: true, value: trimmed };
   }

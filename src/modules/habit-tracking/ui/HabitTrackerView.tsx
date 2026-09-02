@@ -38,7 +38,6 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
   useEffect(() => {
     view.registerRefreshHandler(refresh);
     return () => view.registerRefreshHandler(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   useEffect(() => {
@@ -52,6 +51,7 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
         habit={selected}
         habitService={habitService}
         weekStartsOn={weekStartsOn}
+        pluginSettingsStore={pluginSettingsStore}
         onToggleTrendVisible={async (visible) => {
           await habitService.updateHabit(selected.id, { trendVisible: visible });
           setSelected({ ...selected, trendVisible: visible });
@@ -92,7 +92,12 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
           </button>
         </div>
       </div>
-      <HabitDashboardList key={refreshKey} habitService={habitService} onOpenDetail={setSelected} />
+      <HabitDashboardList
+        key={refreshKey}
+        habitService={habitService}
+        onOpenDetail={setSelected}
+        pluginSettingsStore={pluginSettingsStore}
+      />
       <OverallCommitmentHeatmap
         habitService={habitService}
         weekStartsOn={weekStartsOn}

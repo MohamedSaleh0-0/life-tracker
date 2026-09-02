@@ -23,6 +23,7 @@ import { HabitDefinition, HabitHistoryResult, WeekStartsOn } from '../domain/typ
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
 import { HabitDeleteConfirmModal } from './HabitDeleteConfirmModal';
 import { HabitWizardModal } from './HabitWizardModal';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 export interface HabitDetailViewProps {
   app: App; // needed to open HabitDeleteConfirmModal / HabitWizardModal
@@ -34,6 +35,7 @@ export interface HabitDetailViewProps {
    * real global "week starts on" setting once that shell is built.
    */
   weekStartsOn: WeekStartsOn;
+  pluginSettingsStore?: PluginSettingsStore;
   onToggleTrendVisible: (visible: boolean) => void;
   /** Plain "go back to the list" with no side effect — the missing piece before this fix: previously the only way out of detail view was edit/archive/delete. */
   onBack: () => void;
@@ -85,6 +87,7 @@ export function HabitDetailView({
   habit,
   habitService,
   weekStartsOn,
+  pluginSettingsStore,
   onToggleTrendVisible,
   onBack,
   onEdited,
@@ -92,7 +95,21 @@ export function HabitDetailView({
   onArchived,
 }: HabitDetailViewProps) {
   const [history, setHistory] = useState<HabitHistoryResult | null>(null);
-  const [rangeStart] = useState(() => addDaysLocal(getTodayLocal(), -90));
+  const [rangeStart, setRangeStart] = useState<string>(() => addDaysLocal(getTodayLocal(), -90));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (pluginSettingsStore) {
+      pluginSettingsStore.getTrendWindowDays().then((days) => {
+        if (!cancelled) {
+          setRangeStart(addDaysLocal(getTodayLocal(), -days));
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [pluginSettingsStore]);
 
   useEffect(() => {
     let cancelled = false;

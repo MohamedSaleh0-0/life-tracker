@@ -1,20 +1,3 @@
-// ONE settings tab for the whole plugin, with in-page section
-// navigation.
-//
-// This pass:
-//  - Accounts get an "Archive" action (the `archived` field already
-//    existed on Account and drove list filtering everywhere, but there
-//    was previously no UI to actually set it — an account could be
-//    created and edited but never retired).
-//  - Categories get a "Rename" action alongside the existing "+ Sub"
-//    and "Delete" (renameCategory already existed in the service layer
-//    but had no UI hookup at all).
-//  - Currency conversion section's copy is unchanged in behavior — it
-//    was already generic (any currency's rate is entered relative to
-//    whatever the primary currency is, defaulting to USD, not
-//    hardcoded to any one pair) — but the description text is
-//    clarified so that's obvious at a glance.
-
 import { App, PluginSettingTab, Plugin, Setting } from 'obsidian';
 import { PluginSettingsStore } from '../pluginSettingsStore';
 import { WeekStartsOn } from '../../modules/habit-tracking/domain/types';
@@ -30,7 +13,7 @@ import { RecurringEntryModal } from '../../modules/money-management/ui/Recurring
 import { ConfirmModal } from '../../shared/ui-kit/ConfirmModal';
 import { RenameModal } from '../../shared/ui-kit/RenameModal';
 
-type Section = 'general' | 'habits' | 'dataPoints' | 'money';
+type Section = 'general' | 'habits' | 'dataPoints' | 'money' | 'advanced';
 
 export class LifeTrackerSettingsTab extends PluginSettingTab {
   private activeSection: Section = 'general';
@@ -60,6 +43,7 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
     this.renderNavButton(nav, 'habits', 'Habit Tracking');
     this.renderNavButton(nav, 'dataPoints', 'Data Point Tracking');
     this.renderNavButton(nav, 'money', 'Money Management');
+    this.renderNavButton(nav, 'advanced', 'Advanced');
 
     const body = containerEl.createDiv({ cls: 'ltk-settings-body' });
 
@@ -76,6 +60,9 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       case 'money':
         await this.renderMoneySection(body);
         break;
+      case 'advanced':
+        await this.renderAdvancedSection(body);
+        break;
     }
 
     this.containerEl.scrollTop = previousScrollTop;
@@ -91,8 +78,6 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       this.display();
     });
   }
-
-  // --- General ---
 
   private async renderGeneralSection(containerEl: HTMLElement): Promise<void> {
     const weekStartsOn = await this.pluginSettingsStore.getWeekStartsOn();
@@ -159,8 +144,6 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       );
   }
 
-  // --- Habit Tracking ---
-
   private async renderHabitsSection(containerEl: HTMLElement): Promise<void> {
     new Setting(containerEl)
       .setName('Habits')
@@ -192,8 +175,6 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       );
   }
 
-  // --- Data Point Tracking ---
-
   private renderDataPointsSection(containerEl: HTMLElement): void {
     new Setting(containerEl)
       .setName('Data points')
@@ -207,8 +188,6 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
           })
       );
   }
-
-  // --- Money Management ---
 
   private async renderMoneySection(containerEl: HTMLElement): Promise<void> {
     await this.renderAccountsSection(containerEl);
@@ -326,10 +305,6 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
         );
     }
 
-    // Any currency can be used — not restricted to a fixed list, and
-    // always configured relative to the primary currency above, not to
-    // any one specific hardcoded pair. Lets a rate be set up in
-    // advance, before creating the account that will use it.
     let newCurrencyValue = '';
     new Setting(containerEl)
       .setName('Add a currency')
@@ -508,5 +483,108 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
             new RecurringEntryModal(this.app, this.moneyService, accounts, undefined, () => this.display()).open();
           })
       );
+  }
+
+  private async renderAdvancedSection(containerEl: HTMLElement): Promise<void> {
+    containerEl.createEl('h3', { text: 'Amounts & steppers' });
+
+    const amountStep = await this.pluginSettingsStore.getAmountStepperIncrement();
+    new Setting(containerEl)
+      .setName('Transaction amount stepper increment')
+      .setDesc('How much +/- buttons change values in transaction entry.')
+      .addText((t) =>
+        t.setValue(String(amountStep)).onChange(async (v) => {
+          const n = Number(v);
+          if (Number.isNaN(n) || n <= 0) return;
+          await this.pluginSettingsStore.setAmountStepperIncrement(n);
+        })
+      );
+
+    const habitStep = await this.pluginSettingsStore.getHabitStepperIncrement();
+    new Setting(containerEl)
+      .setName('Numeric habit stepper increment')
+      .setDesc('How much +/- buttons change values on habit check-ins.')
+      .addText((t) =>
+        t.setValue(String(habitStep)).onChange(async (v) => {
+          const n = Number(v);
+          if (Number.isNaN(n) || n <= 0) return;
+          await this.pluginSettingsStore.setHabitStepperIncrement(n);
+        })
+      );
+
+    containerEl.createEl('h3', { text: 'Autocomplete & windows' });
+
+    const namesLimit = await this.pluginSettingsStore.getRecentNamesLimit();
+    new Setting(containerEl)
+      .setName('Recent-names autocomplete list length')
+      .setDesc('Max suggestions shown in name autocompletion.')
+      .addText((t) =>
+        t.setValue(String(namesLimit)).onChange(async (v) => {
+          const n = Number(v);
+          if (Number.isNaN(n) || n <= 0) return;
+          await this.pluginSettingsStore.setRecentNamesLimit(n);
+        })
+      );
+
+    const txWindow = await this.pluginSettingsStore.getRecentTransactionsWindowDays();
+    new Setting(containerEl)
+      .setName('Recent transactions window (days)')
+      .setDesc('How many days of history to display on the main Money dashboard.')
+      .addText((t) =>
+        t.setValue(String(txWindow)).onChange(async (v) => {
+          const n = Number(v);
+          if (Number.isNaN(n) || n <= 0) return;
+          await this.pluginSettingsStore.setRecentTransactionsWindowDays(n);
+        })
+      );
+
+    const trendWindow = await this.pluginSettingsStore.getTrendWindowDays();
+    new Setting(containerEl)
+      .setName('Habit / data point trend window (days)')
+      .setDesc('Default trailing window for charts and history views.')
+      .addText((t) =>
+        t.setValue(String(trendWindow)).onChange(async (v) => {
+          const n = Number(v);
+          if (Number.isNaN(n) || n <= 0) return;
+          await this.pluginSettingsStore.setTrendWindowDays(n);
+        })
+      );
+
+    const snapMinutes = await this.pluginSettingsStore.getClockSnapMinutes();
+    new Setting(containerEl)
+      .setName('Clock picker drag precision (minutes)')
+      .setDesc('How finely dragging the clock face snaps — lower = more precise but fiddlier to drag.')
+      .addDropdown((dd) =>
+        dd
+          .addOption('1', '1 minute')
+          .addOption('5', '5 minutes')
+          .addOption('15', '15 minutes')
+          .setValue(String(snapMinutes))
+          .onChange(async (v) => {
+            await this.pluginSettingsStore.setClockSnapMinutes(Number(v));
+          })
+      );
+
+    containerEl.createEl('h3', { text: 'Log file locations' });
+    containerEl.createEl('p', {
+      text: 'Advanced — where each module writes its markdown logs. Leave blank to use the default under "Life Tracker/Logs/".',
+      cls: 'ltk-empty',
+    });
+    const overrides = await this.pluginSettingsStore.getLogFolderOverrides();
+    const folderSetting = (module: 'habits' | 'dataPoints' | 'money', label: string, defaultPath: string) => {
+      new Setting(containerEl)
+        .setName(label)
+        .addText((t) =>
+          t
+            .setPlaceholder(defaultPath)
+            .setValue(overrides[module] ?? '')
+            .onChange(async (v) => {
+              await this.pluginSettingsStore.setLogFolderOverride(module, v.trim());
+            })
+        );
+    };
+    folderSetting('habits', 'Habit logs folder', 'Life Tracker/Logs/Habits');
+    folderSetting('dataPoints', 'Data point logs folder', 'Life Tracker/Logs/DataPoints');
+    folderSetting('money', 'Money logs folder', 'Life Tracker/Logs/Money');
   }
 }

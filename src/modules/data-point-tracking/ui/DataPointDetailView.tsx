@@ -12,11 +12,13 @@ import { getTodayLocal, addDaysLocal } from '../../../core/date';
 import { DataPointWizardModal } from './DataPointWizardModal';
 import { ConfirmModal } from '../../../shared/ui-kit/ConfirmModal';
 import { formatDurationMinutes } from '../domain/duration';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 export interface DataPointDetailViewProps {
   app: App;
   dataPoint: DataPointDefinition;
   dataPointService: DataPointService;
+  pluginSettingsStore?: PluginSettingsStore;
   onBack: () => void;
   onEdited: () => void;
   onDeleted: () => void;
@@ -50,6 +52,7 @@ export function DataPointDetailView({
   app,
   dataPoint,
   dataPointService,
+  pluginSettingsStore,
   onBack,
   onEdited,
   onDeleted,
@@ -57,9 +60,24 @@ export function DataPointDetailView({
 }: DataPointDetailViewProps) {
   const [trend, setTrend] = useState<TrendPoint[] | null>(null);
   const [textEntries, setTextEntries] = useState<DataPointEntry[] | null>(null);
-  const [rangeStart] = useState(() => addDaysLocal(getTodayLocal(), -90));
+  const [rangeStart, setRangeStart] = useState<string>(() => addDaysLocal(getTodayLocal(), -90));
 
-  const isChartType = dataPoint.type !== 'text';
+  const isBinary = dataPoint.type === 'binary';
+  const isChartType = dataPoint.type !== 'text' && !isBinary;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (pluginSettingsStore) {
+      pluginSettingsStore.getTrendWindowDays().then((days) => {
+        if (!cancelled) {
+          setRangeStart(addDaysLocal(getTodayLocal(), -days));
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [pluginSettingsStore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,18 +138,25 @@ export function DataPointDetailView({
       </header>
 
       {!isChartType ? (
-        <ul className="ltk-datapoint-detail__text-list">
-          {textEntries === null && <li className="ltk-empty">Loading…</li>}
-          {textEntries?.length === 0 && <li className="ltk-empty">No entries yet.</li>}
-          {textEntries?.map((entry) => (
-            <li key={entry.id}>
-              <span className="ltk-datapoint-entry__time">
-                {entry.date} {entry.time}
-              </span>
-              <span className="ltk-datapoint-entry__value">{String(entry.value)}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          {isBinary && textEntries && (
+            <p className="ltk-empty">
+              {textEntries.length} occurrence{textEntries.length === 1 ? '' : 's'} in this window.
+            </p>
+          )}
+          <ul className="ltk-datapoint-detail__text-list">
+            {textEntries === null && <li className="ltk-empty">Loading…</li>}
+            {textEntries?.length === 0 && <li className="ltk-empty">No entries yet.</li>}
+            {textEntries?.map((entry) => (
+              <li key={entry.id}>
+                <span className="ltk-datapoint-entry__time">
+                  {entry.date} {entry.time}
+                </span>
+                <span className="ltk-datapoint-entry__value">{isBinary ? '✓' : String(entry.value)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : (
         <div className="ltk-datapoint-detail__chart">
           {trend && trend.length > 0 ? (
@@ -154,7 +179,7 @@ export function DataPointDetailView({
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            trend && <p className="ltk-empty">No entries yet in the last 90 days.</p>
+            trend && <p className="ltk-empty">No entries yet in this window.</p>
           )}
         </div>
       )}

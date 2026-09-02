@@ -1,16 +1,3 @@
-// 3-step creation/edit wizard (name → type/unit → review), same
-// step-indicator pattern as the habit wizard (REQ-D003), including its
-// built-in templates (REQ-D002). Same module-level-component + context
-// + useEffect pattern as HabitWizardModal — see that file and
-// StepWizard.tsx for why (avoids the render-phase-state bug class
-// entirely).
-//
-// Update: dropped the "Sleep duration" number template — now that the
-// dedicated 'duration' type (start -> end, via the clock picker)
-// exists and covers sleep tracking properly, a plain hand-typed
-// "hours slept" number template was redundant and just invited
-// double-tracking the same thing two different ways.
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
@@ -19,7 +6,6 @@ import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition, DataPointType } from '../domain/types';
 
-// REQ-D002: at least three built-in templates.
 const TEMPLATES: { label: string; name: string; type: DataPointType; unit?: string }[] = [
   { label: '⚖️ Weight', name: 'Weight', type: 'number', unit: 'kg' },
   { label: '⏰ Wake-up time', name: 'Wake-up time', type: 'time' },
@@ -97,6 +83,15 @@ function TypeStep({ onValidChange }: WizardStepProps) {
         Duration (start → end)
       </label>
       <label>
+        <input type="radio" checked={type === 'binary'} onChange={() => setType('binary')} />
+        Event (happened / didn't happen)
+      </label>
+      {type === 'binary' && (
+        <p className="ltk-empty">
+          Log it whenever it happens — no schedule, no missed days, just a timestamped record of each occurrence.
+        </p>
+      )}
+      <label>
         <input type="radio" checked={type === 'text'} onChange={() => setType('text')} />
         Text
       </label>
@@ -124,7 +119,15 @@ function ReviewStep({ onValidChange }: WizardStepProps) {
   }, [onValidChange]);
 
   const typeLabel =
-    type === 'number' ? 'Number' : type === 'time' ? 'Time of day' : type === 'duration' ? 'Duration (start → end)' : 'Text';
+    type === 'number'
+      ? 'Number'
+      : type === 'time'
+        ? 'Time of day'
+        : type === 'duration'
+          ? 'Duration (start → end)'
+          : type === 'binary'
+            ? "Event (happened / didn't happen)"
+            : 'Text';
 
   return (
     <div className="ltk-wizard-step ltk-wizard-step--review">
@@ -181,7 +184,6 @@ function DataPointWizardForm({ dataPointService, existingDataPoint, onCancel, on
   );
 }
 
-/** Obsidian Modal wrapper — REQ-D004's two entry points (dashboard + settings tab) both construct this. */
 export class DataPointWizardModal extends Modal {
   private root: Root | null = null;
 

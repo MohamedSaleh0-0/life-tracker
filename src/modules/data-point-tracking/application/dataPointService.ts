@@ -1,8 +1,3 @@
-// Orchestrates the domain layer (validation, trend aggregation) and
-// infrastructure layer (settings store, log file) into the operations
-// the UI layer calls. No direct file I/O of its own. Mirrors
-// habitService.ts's structure and DI pattern.
-
 import {
   DataPointDefinition,
   DataPointEntry,
@@ -16,7 +11,6 @@ import { DataPointSettingsStore } from '../infrastructure/dataPointSettingsStore
 import { DataPointLogFile, RawDataPointEntry } from '../infrastructure/dataPointLogFile';
 import { getTodayLocal } from '../../../core/date';
 
-/** Thrown by deleteDataPoint when history exists and confirmed !== true (mirrors Habit Tracking's REQ-H015-style gate). */
 export class DeleteRequiresConfirmationError extends Error {
   constructor(public readonly definitionId: string) {
     super(`Data point ${definitionId} has existing history; deletion requires confirmation.`);
@@ -24,7 +18,6 @@ export class DeleteRequiresConfirmationError extends Error {
   }
 }
 
-/** Thrown by logEntry/editEntry when the raw input fails REQ-D009 validation for the data point's type. */
 export class InvalidEntryValueError extends Error {
   constructor(message: string) {
     super(message);
@@ -86,13 +79,11 @@ export class DataPointService {
     await this.settingsStore.delete(id);
   }
 
-  /** All non-archived data points, in display order — the dashboard's full list (REQ-C001/D007; data points have no schedule, so no pending/completed split like habits). */
   async getActiveDataPoints(): Promise<DataPointDefinition[]> {
     const all = await this.settingsStore.getAll();
     return all.filter((d) => !d.archived).sort((a, b) => a.order - b.order);
   }
 
-  /** Logs a brand-new entry (REQ-D005/D006), validated against the definition's type (REQ-D009). `date` defaults to today via the caller, but may be backdated. */
   async logEntry(definitionId: string, date: string, time: string, rawInput: string): Promise<DataPointEntry> {
     const definition = await this.requireDefinition(definitionId);
     const validated = this.validateOrThrow(definition, rawInput);
@@ -107,7 +98,11 @@ export class DataPointService {
     return this.toDomainEntry(raw, definition);
   }
 
-  /** Edits an already-logged entry in place (REQ-D008/D012) — same entryId, upsert overwrites. */
+  /** One-tap occurrence log for a binary data point — no value input needed. */
+  async logOccurrence(definitionId: string, date: string, time: string): Promise<DataPointEntry> {
+    return this.logEntry(definitionId, date, time, '1');
+  }
+
   async editEntry(
     entryId: string,
     definitionId: string,
@@ -126,7 +121,6 @@ export class DataPointService {
     await this.logFile.deleteEntry(date, entryId);
   }
 
-  /** Today's logged entries, grouped by data point (REQ-D007's "today's logged entries as a list"). */
   async getEntriesForToday(): Promise<Map<string, DataPointEntry[]>> {
     const today = this.today();
     const raw = await this.logFile.readDay(today);
@@ -147,7 +141,6 @@ export class DataPointService {
     return grouped;
   }
 
-  /** All of one data point's entries in a date range, typed per its definition — for the trend chart (number/time/duration) or recent-entries list (text). REQ-D010/D011. */
   async getEntriesInRange(definitionId: string, rangeStart: string, rangeEnd: string): Promise<DataPointEntry[]> {
     const definition = await this.requireDefinition(definitionId);
     const raw = await this.logFile.readRange(rangeStart, rangeEnd);
@@ -157,7 +150,6 @@ export class DataPointService {
       .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   }
 
-  /** Trend points for a number/time-of-day/duration data point over a range (REQ-D010). Text-type data points have no numeric trend — see design doc's resolved Open Question. */
   async getTrend(definitionId: string, rangeStart: string, rangeEnd: string): Promise<TrendPoint[]> {
     const definition = await this.requireDefinition(definitionId);
     const entries = await this.getEntriesInRange(definitionId, rangeStart, rangeEnd);
@@ -177,7 +169,8 @@ export class DataPointService {
   }
 
   private toDomainEntry(raw: RawDataPointEntry, definition: DataPointDefinition): DataPointEntry {
-    const value: DataPointLogValue = definition.type === 'number' ? Number(raw.rawValue) : raw.rawValue;
+    const value: DataPointLogValue =
+      definition.type === 'number' || definition.type === 'binary' ? Number(raw.rawValue) : raw.rawValue;
     return { id: raw.id, definitionId: raw.definitionId, date: raw.date, time: raw.time, value };
   }
 }

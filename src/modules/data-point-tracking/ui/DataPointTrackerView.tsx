@@ -19,15 +19,17 @@ import { DataPointDetailView } from './DataPointDetailView';
 import { DataPointWizardModal } from './DataPointWizardModal';
 import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition } from '../domain/types';
+import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
 
 export const VIEW_TYPE_DATA_POINT_TRACKER = 'life-tracker-data-points';
 
 interface DataPointTrackerRootProps {
   view: DataPointTrackerView;
   dataPointService: DataPointService;
+  pluginSettingsStore?: PluginSettingsStore;
 }
 
-function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootProps) {
+function DataPointTrackerRoot({ view, dataPointService, pluginSettingsStore }: DataPointTrackerRootProps) {
   const [selected, setSelected] = useState<DataPointDefinition | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
@@ -38,7 +40,6 @@ function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootPr
   useEffect(() => {
     view.registerRefreshHandler(refresh);
     return () => view.registerRefreshHandler(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   if (selected) {
@@ -47,6 +48,7 @@ function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootPr
         app={view.app}
         dataPoint={selected}
         dataPointService={dataPointService}
+        pluginSettingsStore={pluginSettingsStore}
         onBack={() => setSelected(null)}
         onEdited={() => {
           setSelected(null);
@@ -85,6 +87,7 @@ function DataPointTrackerRoot({ view, dataPointService }: DataPointTrackerRootPr
         key={refreshKey}
         app={view.app}
         dataPointService={dataPointService}
+        pluginSettingsStore={pluginSettingsStore}
         onOpenDetail={setSelected}
       />
     </div>
@@ -97,7 +100,8 @@ export class DataPointTrackerView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private dataPointService: DataPointService
+    private dataPointService: DataPointService,
+    private pluginSettingsStore?: PluginSettingsStore
   ) {
     super(leaf);
   }
@@ -122,7 +126,11 @@ export class DataPointTrackerView extends ItemView {
     this.root = createRoot(this.contentEl);
     this.root.render(
       <ErrorBoundary>
-        <DataPointTrackerRoot view={this} dataPointService={this.dataPointService} />
+        <DataPointTrackerRoot
+          view={this}
+          dataPointService={this.dataPointService}
+          pluginSettingsStore={this.pluginSettingsStore}
+        />
       </ErrorBoundary>
     );
 

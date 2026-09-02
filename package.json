@@ -22,6 +22,7 @@
     "esbuild": "^0.24.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "obsidian": "latest",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0",
@@ -31,6 +32,6 @@
     "nanoid": "^5.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^2.12.0"
+    "recharts": "^2.15.4"
   }
 }
