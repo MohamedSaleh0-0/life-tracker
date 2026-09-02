@@ -1,3 +1,22 @@
+// ONE settings tab for the whole plugin, with in-page section
+// navigation.
+//
+// This pass:
+//  - Accounts get an "Archive" action (the `archived` field already
+//    existed on Account and drove list filtering everywhere, but there
+//    was previously no UI to actually set it — an account could be
+//    created and edited but never retired).
+//  - Categories get a "Rename" action alongside the existing "+ Sub"
+//    and "Delete" (renameCategory already existed in the service layer
+//    but had no UI hookup at all).
+//  - Currency conversion section's copy is unchanged in behavior — it
+//    was already generic (any currency's rate is entered relative to
+//    whatever the primary currency is, defaulting to USD, not
+//    hardcoded to any one pair) — but the description text is
+//    clarified so that's obvious at a glance.
+//  - Features section: provides presets (Minimal, Standard, Power user)
+//    and individual feature-level toggles (REQ-C006/REQ-C007).
+
 import { App, PluginSettingTab, Plugin, Setting } from 'obsidian';
 import { PluginSettingsStore } from '../pluginSettingsStore';
 import { WeekStartsOn } from '../../modules/habit-tracking/domain/types';
@@ -12,8 +31,9 @@ import { CategoryModal } from '../../modules/money-management/ui/CategoryModal';
 import { RecurringEntryModal } from '../../modules/money-management/ui/RecurringEntryModal';
 import { ConfirmModal } from '../../shared/ui-kit/ConfirmModal';
 import { RenameModal } from '../../shared/ui-kit/RenameModal';
+import { FeatureFlags } from '../featureFlags';
 
-type Section = 'general' | 'habits' | 'dataPoints' | 'money' | 'advanced';
+type Section = 'general' | 'features' | 'habits' | 'dataPoints' | 'money' | 'advanced';
 
 export class LifeTrackerSettingsTab extends PluginSettingTab {
   private activeSection: Section = 'general';
@@ -40,6 +60,7 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
 
     const nav = containerEl.createDiv({ cls: 'ltk-settings-nav' });
     this.renderNavButton(nav, 'general', 'General');
+    this.renderNavButton(nav, 'features', 'Features');
     this.renderNavButton(nav, 'habits', 'Habit Tracking');
     this.renderNavButton(nav, 'dataPoints', 'Data Point Tracking');
     this.renderNavButton(nav, 'money', 'Money Management');
@@ -51,11 +72,14 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       case 'general':
         await this.renderGeneralSection(body);
         break;
+      case 'features':
+        await this.renderFeaturesSection(body);
+        break;
       case 'habits':
         await this.renderHabitsSection(body);
         break;
       case 'dataPoints':
-        this.renderDataPointsSection(body);
+        await this.renderDataPointsSection(body);
         break;
       case 'money':
         await this.renderMoneySection(body);
@@ -78,6 +102,8 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       this.display();
     });
   }
+
+  // --- General ---
 
   private async renderGeneralSection(containerEl: HTMLElement): Promise<void> {
     const weekStartsOn = await this.pluginSettingsStore.getWeekStartsOn();
@@ -144,6 +170,77 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       );
   }
 
+  // --- Features & Customizability (REQ-C006) ---
+
+  private async renderFeaturesSection(containerEl: HTMLElement): Promise<void> {
+    containerEl.createEl('h3', { text: 'Presets' });
+    containerEl.createEl('p', {
+      text: 'A preset sets every toggle below at once — pick one as a starting point, then adjust individual toggles as you like.',
+      cls: 'ltk-empty',
+    });
+
+    new Setting(containerEl)
+      .setName('Quick starting points')
+      .addButton((b) =>
+        b.setButtonText('Minimal').onClick(async () => {
+          await this.pluginSettingsStore.applyFeaturePreset('minimal');
+          this.display();
+        })
+      )
+      .addButton((b) =>
+        b.setButtonText('Standard').onClick(async () => {
+          await this.pluginSettingsStore.applyFeaturePreset('standard');
+          this.display();
+        })
+      )
+      .addButton((b) =>
+        b
+          .setButtonText('Power user')
+          .setCta()
+          .onClick(async () => {
+            await this.pluginSettingsStore.applyFeaturePreset('power');
+            this.display();
+          })
+      );
+
+    const flags = await this.pluginSettingsStore.getFeatureFlags();
+    const toggle = (key: keyof FeatureFlags, name: string, desc?: string) => {
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(desc ?? '')
+        .addToggle((t) =>
+          t.setValue(flags[key]).onChange(async (v) => {
+            await this.pluginSettingsStore.setFeatureFlag(key, v);
+          })
+        );
+    };
+
+    containerEl.createEl('h3', { text: 'Money Management' });
+    toggle(
+      'moneyEssentialJudgment',
+      'Essential? / Judgment on expenses',
+      'Off by default — power users who want behavioral spending insights can turn it on.'
+    );
+    toggle('moneyTransactionNotes', 'Note field on transactions');
+    toggle('moneyTransactionQuantity', 'Quantity field on transactions and shopping items');
+    toggle('moneyTransactionTimeOfDay', 'Explicit time-of-day on transactions', 'Off = transactions are recorded at current time without a manual time field.');
+    toggle('moneyShoppingDueDates', 'Due dates on shopping items');
+    toggle('moneyBudgetChecking', 'Category budgets & over-budget warnings');
+    toggle('moneyRecurringEntries', '"Needs attention" recurring entries section');
+    toggle('moneyDebts', 'Debts section');
+
+    containerEl.createEl('h3', { text: 'Habit Tracking' });
+    toggle('habitReminders', 'Habit reminders (fixed time / prayer-relative)');
+    toggle('habitCommitmentPhase', '"Start new commitment phase" streak action');
+    toggle('habitOverallHeatmap', 'Overall commitment heatmap on the main Habits view');
+    toggle('habitLevelsType', '"Custom levels" as a selectable habit type');
+
+    containerEl.createEl('h3', { text: 'Data Point Tracking' });
+    toggle('dataPointTemplates', 'Quick-template buttons in the data point wizard');
+  }
+
+  // --- Habit Tracking ---
+
   private async renderHabitsSection(containerEl: HTMLElement): Promise<void> {
     new Setting(containerEl)
       .setName('Habits')
@@ -152,8 +249,9 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
         btn
           .setButtonText('New habit')
           .setCta()
-          .onClick(() => {
-            new HabitWizardModal(this.app, this.habitService, this.getWeekStartsOn()).open();
+          .onClick(async () => {
+            const flags = await this.pluginSettingsStore.getFeatureFlags();
+            new HabitWizardModal(this.app, this.habitService, this.getWeekStartsOn(), undefined, undefined, flags).open();
           })
       );
 
@@ -175,7 +273,9 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
       );
   }
 
-  private renderDataPointsSection(containerEl: HTMLElement): void {
+  // --- Data Point Tracking ---
+
+  private async renderDataPointsSection(containerEl: HTMLElement): Promise<void> {
     new Setting(containerEl)
       .setName('Data points')
       .setDesc('Create and manage your custom data points.')
@@ -183,11 +283,14 @@ export class LifeTrackerSettingsTab extends PluginSettingTab {
         btn
           .setButtonText('New data point')
           .setCta()
-          .onClick(() => {
-            new DataPointWizardModal(this.app, this.dataPointService).open();
+          .onClick(async () => {
+            const flags = await this.pluginSettingsStore.getFeatureFlags();
+            new DataPointWizardModal(this.app, this.dataPointService, undefined, undefined, flags).open();
           })
       );
   }
+
+  // --- Money Management ---
 
   private async renderMoneySection(containerEl: HTMLElement): Promise<void> {
     await this.renderAccountsSection(containerEl);

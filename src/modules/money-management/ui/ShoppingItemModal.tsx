@@ -1,101 +1,98 @@
-// Add an item to a shopping list (REQ-M022) — name, category, quantity,
-// optional estimated price (can be decided later, at purchase time —
-// REQ-M022's explicit allowance), optional note, optional due date.
-//
-// Update: the category field now supports creating a brand-new main
-// category or subcategory inline, same "+ New category…" pattern
-// already used in TransactionEntryModal — previously this form only
-// offered a plain picker over categories that already existed,
-// forcing a trip to Settings first if the right one didn't exist yet.
+// Create/edit an individual shopping list item (REQ-M022).
+// Supports category assignment, quantity, estimated price, optional note, and due date.
+// Gated by FeatureFlags (REQ-C006).
 
 import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { MoneyService } from '../application/moneyService';
+import { ShoppingItem } from '../domain/types';
 import { CategoryNode } from '../domain/categoryTree';
-
-const NEW_OPTION = '__new__';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
 interface ShoppingItemFormProps {
   moneyService: MoneyService;
   listId: string;
+  existingItem?: ShoppingItem;
+  featureFlags?: FeatureFlags;
   onCancel: () => void;
   onSaved: () => void;
 }
 
-function ShoppingItemForm({ moneyService, listId, onCancel, onSaved }: ShoppingItemFormProps) {
-  const [name, setName] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [estimatedPrice, setEstimatedPrice] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [note, setNote] = useState('');
+function ShoppingItemForm({
+  moneyService,
+  listId,
+  existingItem,
+  featureFlags,
+  onCancel,
+  onSaved,
+}: ShoppingItemFormProps) {
+  const flags = featureFlags ?? DEFAULT_FEATURE_FLAGS;
+  const [name, setName] = useState(existingItem?.name ?? '');
+  const [categoryId, setCategoryId] = useState(existingItem?.categoryId ?? '');
+  const [quantity, setQuantity] = useState(existingItem?.quantity !== undefined ? String(existingItem.quantity) : '1');
+  const [estimatedPrice, setEstimatedPrice] = useState(
+    existingItem?.estimatedPrice !== undefined ? String(existingItem.estimatedPrice) : ''
+  );
+  const [note, setNote] = useState(existingItem?.note ?? '');
+  const [dueDate, setDueDate] = useState(existingItem?.dueDate ?? '');
+
+  const [recentNames, setRecentNames] = useState<string[]>([]);
   const [categoryTree, setCategoryTree] = useState<CategoryNode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline "+ New category / subcategory" — same pattern as
-  // TransactionEntryModal, so a shopping item never needs to be
-  // blocked on a trip to Settings just to categorize it.
-  const [showNewCategory, setShowNewCategory] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCategoryParentId, setNewCategoryParentId] = useState('');
-
-  const refreshCategoryTree = async () => {
-    setCategoryTree(await moneyService.getCategoryTree('expense'));
-  };
-
   useEffect(() => {
-    refreshCategoryTree();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moneyService]);
-
-  const handleCategorySelect = (value: string) => {
-    if (value === NEW_OPTION) {
-      setShowNewCategory(true);
-      return;
-    }
-    setCategoryId(value);
-  };
-
-  const handleCreateCategory = async () => {
-    const trimmed = newCategoryName.trim();
-    if (!trimmed) return;
-    const created = await moneyService.createCategory({
-      kind: 'expense',
-      name: trimmed,
-      parentId: newCategoryParentId || undefined,
+    let cancelled = false;
+    Promise.all([
+      moneyService.getCategoryTree('expense'),
+      moneyService.getRecentItemNames(),
+    ]).then(([tree, names]) => {
+      if (!cancelled) {
+        setCategoryTree(tree);
+        setRecentNames(names);
+      }
     });
-    await refreshCategoryTree();
-    setCategoryId(created.id);
-    setShowNewCategory(false);
-    setNewCategoryName('');
-    setNewCategoryParentId('');
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [moneyService]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim() === '') {
-      setError('Enter a name.');
+      setError('Enter an item name.');
       return;
     }
+    const parsedQty = flags.moneyTransactionQuantity && quantity.trim() ? Number(quantity) : undefined;
+    const parsedPrice = estimatedPrice.trim() ? Number(estimatedPrice) : undefined;
+    if (parsedPrice !== undefined && (Number.isNaN(parsedPrice) || parsedPrice < 0)) {
+      setError('Estimated price must be a valid positive number.');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
-      await moneyService.addShoppingItem({
+      const input = {
         listId,
         name: name.trim(),
         categoryId: categoryId || undefined,
-        quantity: quantity ? Number(quantity) : undefined,
-        estimatedPrice: estimatedPrice.trim() !== '' ? Number(estimatedPrice) : undefined,
-        note: note || undefined,
-        dueDate: dueDate || undefined,
-      });
+        quantity: parsedQty,
+        estimatedPrice: parsedPrice,
+        note: flags.moneyTransactionNotes && note.trim() ? note.trim() : undefined,
+        dueDate: flags.moneyShoppingDueDates && dueDate.trim() ? dueDate.trim() : undefined,
+      };
+
+      if (existingItem) {
+        await moneyService.updateShoppingItemDetails(existingItem.id, input);
+      } else {
+        await moneyService.addShoppingItem(input);
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
       setSubmitting(false);
     }
   };
@@ -103,73 +100,86 @@ function ShoppingItemForm({ moneyService, listId, onCancel, onSaved }: ShoppingI
   return (
     <form className="ltk-entry-form" onSubmit={handleSubmit}>
       <label>
-        Name
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Milk" autoFocus />
+        Item name
+        <input
+          list="recent-shopping-items"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Milk, Apples"
+          autoFocus
+          required
+        />
+        <datalist id="recent-shopping-items">
+          {recentNames.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
       </label>
+
       <label>
         Category (optional)
-        <select value={showNewCategory ? NEW_OPTION : categoryId} onChange={(e) => handleCategorySelect(e.target.value)}>
-          <option value="">Uncategorized</option>
+        <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          <option value="">(Uncategorized)</option>
           {categoryTree.map((node) => (
-            <React.Fragment key={node.category.id}>
+            <optgroup key={node.category.id} label={node.category.name}>
               <option value={node.category.id}>{node.category.name}</option>
               {node.children.map((child) => (
                 <option key={child.id} value={child.id}>
-                  &nbsp;&nbsp;{child.name}
+                  ↳ {child.name}
                 </option>
               ))}
-            </React.Fragment>
+            </optgroup>
           ))}
-          <option value={NEW_OPTION}>+ New category / subcategory…</option>
         </select>
       </label>
-      {showNewCategory && (
-        <div className="ltk-inline-create">
+
+      <div className="ltk-entry-form__row">
+        {flags.moneyTransactionQuantity && (
+          <label>
+            Quantity
+            <input
+              type="number"
+              step="any"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="1"
+            />
+          </label>
+        )}
+        <label>
+          Estimated price (optional)
           <input
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="New category name"
-            autoFocus
+            type="number"
+            step="any"
+            value={estimatedPrice}
+            onChange={(e) => setEstimatedPrice(e.target.value)}
+            placeholder="0.00"
           />
-          <select value={newCategoryParentId} onChange={(e) => setNewCategoryParentId(e.target.value)}>
-            <option value="">As a main category</option>
-            {categoryTree.map((node) => (
-              <option key={node.category.id} value={node.category.id}>
-                Sub of: {node.category.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={handleCreateCategory}>
-            Add
-          </button>
-          <button type="button" onClick={() => setShowNewCategory(false)}>
-            Cancel
-          </button>
-        </div>
+        </label>
+      </div>
+
+      {flags.moneyShoppingDueDates && (
+        <label>
+          Due date (optional)
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        </label>
       )}
-      <label>
-        Quantity (optional)
-        <input type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-      </label>
-      <label>
-        Estimated price (optional — can decide when buying)
-        <input type="number" step="any" value={estimatedPrice} onChange={(e) => setEstimatedPrice(e.target.value)} />
-      </label>
-      <label>
-        Due date (optional)
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-      </label>
-      <label>
-        Note (optional)
-        <input value={note} onChange={(e) => setNote(e.target.value)} />
-      </label>
+
+      {flags.moneyTransactionNotes && (
+        <label>
+          Note (optional)
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. 2% organic only" />
+        </label>
+      )}
+
       {error && <p className="ltk-form-error">{error}</p>}
+
       <div className="ltk-entry-form__actions">
         <button type="button" onClick={onCancel} disabled={submitting}>
           Cancel
         </button>
         <button type="submit" className="ltk-button--accent" disabled={submitting}>
-          Add
+          {existingItem ? 'Save' : 'Add'}
         </button>
       </div>
     </form>
@@ -183,19 +193,23 @@ export class ShoppingItemModal extends Modal {
     app: App,
     private moneyService: MoneyService,
     private listId: string,
-    private onSaved: () => void
+    private onSaved: () => void,
+    private existingItem?: ShoppingItem,
+    private featureFlags?: FeatureFlags
   ) {
     super(app);
   }
 
   onOpen(): void {
-    this.titleEl.setText('Add item');
+    this.titleEl.setText(this.existingItem ? 'Edit item' : 'Add item');
     this.root = createRoot(this.contentEl);
     this.root.render(
       <ErrorBoundary>
         <ShoppingItemForm
           moneyService={this.moneyService}
           listId={this.listId}
+          existingItem={this.existingItem}
+          featureFlags={this.featureFlags}
           onCancel={() => this.close()}
           onSaved={() => {
             this.onSaved();

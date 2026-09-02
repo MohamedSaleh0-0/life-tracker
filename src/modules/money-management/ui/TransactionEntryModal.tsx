@@ -1,6 +1,9 @@
 // Single consolidated entry form for expense/income/transfer/adjustment (REQ-M005).
 // Category selection offers scoped subcategories (REQ-M012) and an inline "+ New category"
 // creator. Supports Essential/Judgment tags and budget check warnings.
+//
+// Update: Gated by FeatureFlags (REQ-C006) — quantity, note, time-of-day,
+// budget check, and essential/judgment fields render only when enabled.
 
 import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -17,6 +20,7 @@ import {
 import { CategoryNode } from '../domain/categoryTree';
 import { getTodayLocal } from '../../../core/date';
 import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
 function nowHHMM(): string {
   const now = new Date();
@@ -32,6 +36,7 @@ interface TransactionFormProps {
   onCancel: () => void;
   onSaved: () => void;
   pluginSettingsStore?: PluginSettingsStore;
+  featureFlags?: FeatureFlags;
 }
 
 function TransactionForm({
@@ -41,7 +46,9 @@ function TransactionForm({
   onCancel,
   onSaved,
   pluginSettingsStore,
+  featureFlags,
 }: TransactionFormProps) {
+  const flags = featureFlags ?? DEFAULT_FEATURE_FLAGS;
   const [type, setType] = useState<TransactionType>('expense');
   const [date, setDate] = useState(getTodayLocal());
   const [time, setTime] = useState(nowHHMM());
@@ -88,31 +95,32 @@ function TransactionForm({
     setError(null);
     try {
       const parsedAmount = Number(amount);
-      const parsedQty = quantity.trim() ? Number(quantity) : undefined;
+      const parsedQty = flags.moneyTransactionQuantity && quantity.trim() ? Number(quantity) : undefined;
+      const effectiveTime = flags.moneyTransactionTimeOfDay ? time : nowHHMM();
 
       if (type === 'transfer') {
         await moneyService.recordTransfer({
           date,
-          time,
+          time: effectiveTime,
           fromAccountId: accountId,
           toAccountId,
           amount: parsedAmount,
-          note: note || undefined,
+          note: flags.moneyTransactionNotes ? (note || undefined) : undefined,
         });
       } else {
         const signedAmount = type === 'expense' ? -Math.abs(parsedAmount) : Math.abs(parsedAmount);
         await moneyService.recordTransaction({
           date,
-          time,
+          time: effectiveTime,
           accountId,
           type,
           categoryId: categoryId || undefined,
           amount: signedAmount,
           quantity: parsedQty,
           name: name.trim() || undefined,
-          note: note || undefined,
-          essential: type === 'expense' ? essential : undefined,
-          judgment: type === 'expense' ? judgment : undefined,
+          note: flags.moneyTransactionNotes ? (note || undefined) : undefined,
+          essential: type === 'expense' && flags.moneyEssentialJudgment ? essential : undefined,
+          judgment: type === 'expense' && flags.moneyEssentialJudgment ? judgment : undefined,
         });
       }
       onSaved();
@@ -133,13 +141,13 @@ function TransactionForm({
       setError('Cannot transfer to the same account.');
       return;
     }
-    if (type === 'expense' && !essentialJudgmentValid(essential, judgment)) {
+    if (type === 'expense' && flags.moneyEssentialJudgment && !essentialJudgmentValid(essential, judgment)) {
       setError('Please choose whether this purchase was essential.');
       return;
     }
 
     // Budget check warning (REQ-M018-style notification before overspending)
-    if (type === 'expense' && categoryId) {
+    if (type === 'expense' && categoryId && flags.moneyBudgetChecking) {
       const budgetCheck = await moneyService.checkBudget(categoryId, parsedAmount, date);
       if (budgetCheck?.exceeded) {
         new ConfirmModal(
@@ -172,10 +180,12 @@ function TransactionForm({
           Date
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
         </label>
-        <label>
-          Time
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
-        </label>
+        {flags.moneyTransactionTimeOfDay && (
+          <label>
+            Time
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+          </label>
+        )}
       </div>
 
       <div className="ltk-entry-form__row">
@@ -260,7 +270,7 @@ function TransactionForm({
             </label>
           )}
 
-          {type === 'expense' && (
+          {type === 'expense' && flags.moneyEssentialJudgment && (
             <EssentialJudgmentFields
               essential={essential}
               onEssentialChange={setEssential}
@@ -269,22 +279,26 @@ function TransactionForm({
             />
           )}
 
-          <label>
-            Quantity (optional)
-            <input
-              type="number"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              placeholder="1"
-            />
-          </label>
+          {flags.moneyTransactionQuantity && (
+            <label>
+              Quantity (optional)
+              <input
+                type="number"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="1"
+              />
+            </label>
+          )}
         </>
       )}
 
-      <label>
-        Note (optional)
-        <input value={note} onChange={(e) => setNote(e.target.value)} />
-      </label>
+      {flags.moneyTransactionNotes && (
+        <label>
+          Note (optional)
+          <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+      )}
 
       {error && <p className="ltk-form-error">{error}</p>}
 
@@ -308,7 +322,8 @@ export class TransactionEntryModal extends Modal {
     private moneyService: MoneyService,
     private accounts: Account[],
     private onSaved: () => void,
-    private pluginSettingsStore?: PluginSettingsStore
+    private pluginSettingsStore?: PluginSettingsStore,
+    private featureFlags?: FeatureFlags
   ) {
     super(app);
   }
@@ -323,6 +338,7 @@ export class TransactionEntryModal extends Modal {
           moneyService={this.moneyService}
           accounts={this.accounts}
           pluginSettingsStore={this.pluginSettingsStore}
+          featureFlags={this.featureFlags}
           onCancel={() => this.close()}
           onSaved={() => {
             this.onSaved();

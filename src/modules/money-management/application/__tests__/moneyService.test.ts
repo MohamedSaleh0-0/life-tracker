@@ -317,6 +317,25 @@ describe('MoneyService recurring entries', () => {
   });
 });
 
+describe('MoneyService transfers', () => {
+  test('deleting either leg of a transfer removes both (REQ-M002/M003 integrity)', async () => {
+    const { service } = makeService();
+    const checking = await service.createAccount({ name: 'Checking', currency: 'USD', openingBalance: 500 });
+    const savings = await service.createAccount({ name: 'Savings', currency: 'USD', openingBalance: 0 });
+    const [fromLeg] = await service.recordTransfer({
+      date: '2026-08-19',
+      fromAccountId: checking.id,
+      toAccountId: savings.id,
+      amount: 100,
+    });
+
+    await service.deleteTransaction('2026-08-19', fromLeg.id);
+
+    const remaining = await service.listTransactions('2026-08-19', '2026-08-19');
+    assert.equal(remaining.length, 0); // both legs gone, not just one
+  });
+});
+
 describe('MoneyService shopping lists', () => {
   test('addShoppingItem accepts an unknown price at add-time (REQ-M022)', async () => {
     const { service } = makeService();
@@ -336,28 +355,6 @@ describe('MoneyService shopping lists', () => {
     const summary = await service.getShoppingListSummary(list.id);
     assert.equal(summary.pendingCount, 3);
     assert.equal(summary.estimatedTotal, 5); // 3 + 2, Eggs excluded
-  });
-});
-
-describe('MoneyService transfers', () => {
-  test('deleting either leg of a transfer removes both (REQ-M002/M003 integrity)', async () => {
-    const { service } = makeService();
-    const checking = await service.createAccount({ name: 'Checking', currency: 'USD', openingBalance: 500 });
-    const savings = await service.createAccount({ name: 'Savings', currency: 'USD', openingBalance: 0 });
-    const [fromLeg] = await service.recordTransfer({
-      date: '2026-08-19',
-      fromAccountId: checking.id,
-      toAccountId: savings.id,
-      amount: 100,
-    });
-
-    await service.deleteTransaction('2026-08-19', fromLeg.id);
-
-    const remaining = await service.listTransactions('2026-08-19', '2026-08-19');
-    assert.equal(remaining.length, 0); // both legs gone, not just one
-  });
-});
-    assert.equal(summary.estimatedTotal, 5);
   });
 
   test('markShoppingItemBought creates a linked expense transaction and moves the item to purchase history (REQ-M023)', async () => {

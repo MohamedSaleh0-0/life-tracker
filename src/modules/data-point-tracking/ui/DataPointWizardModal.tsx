@@ -1,3 +1,19 @@
+// 3-step creation/edit wizard (name → type/unit → review), same
+// step-indicator pattern as the habit wizard (REQ-D003), including its
+// built-in templates (REQ-D002). Same module-level-component + context
+// + useEffect pattern as HabitWizardModal — see that file and
+// StepWizard.tsx for why (avoids the render-phase-state bug class
+// entirely).
+//
+// Update: dropped the "Sleep duration" number template — now that the
+// dedicated 'duration' type (start -> end, via the clock picker)
+// exists and covers sleep tracking properly, a plain hand-typed
+// "hours slept" number template was redundant and just invited
+// double-tracking the same thing two different ways.
+//
+// Update: Gated by FeatureFlags (REQ-C006) — the quick-template buttons
+// render only when dataPointTemplates is enabled.
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
@@ -5,7 +21,9 @@ import { StepWizard, WizardStep, WizardStepProps } from '../../../shared/ui-kit/
 import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { DataPointService } from '../application/dataPointService';
 import { DataPointDefinition, DataPointType } from '../domain/types';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
+// REQ-D002: at least three built-in templates.
 const TEMPLATES: { label: string; name: string; type: DataPointType; unit?: string }[] = [
   { label: '⚖️ Weight', name: 'Weight', type: 'number', unit: 'kg' },
   { label: '⏰ Wake-up time', name: 'Wake-up time', type: 'time' },
@@ -19,6 +37,7 @@ interface WizardCtx {
   setType: (v: DataPointType) => void;
   unit: string;
   setUnit: (v: string) => void;
+  featureFlags: FeatureFlags;
 }
 
 const WizardContext = createContext<WizardCtx | null>(null);
@@ -30,7 +49,7 @@ function useWizardCtx(): WizardCtx {
 }
 
 function NameStep({ onValidChange }: WizardStepProps) {
-  const { name, setName, setType, setUnit } = useWizardCtx();
+  const { name, setName, setType, setUnit, featureFlags } = useWizardCtx();
 
   useEffect(() => {
     onValidChange(name.trim().length > 0);
@@ -38,21 +57,23 @@ function NameStep({ onValidChange }: WizardStepProps) {
 
   return (
     <div className="ltk-wizard-step">
-      <div className="ltk-template-row">
-        {TEMPLATES.map((t) => (
-          <button
-            key={t.label}
-            type="button"
-            onClick={() => {
-              setName(t.name);
-              setType(t.type);
-              setUnit(t.unit ?? '');
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {featureFlags.dataPointTemplates && (
+        <div className="ltk-template-row">
+          {TEMPLATES.map((t) => (
+            <button
+              key={t.label}
+              type="button"
+              onClick={() => {
+                setName(t.name);
+                setType(t.type);
+                setUnit(t.unit ?? '');
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
       <label>
         Name
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mood, Play time" />
@@ -153,14 +174,22 @@ interface DataPointWizardFormProps {
   existingDataPoint?: DataPointDefinition;
   onCancel: () => void;
   onSaved: () => void;
+  featureFlags?: FeatureFlags;
 }
 
-function DataPointWizardForm({ dataPointService, existingDataPoint, onCancel, onSaved }: DataPointWizardFormProps) {
+function DataPointWizardForm({
+  dataPointService,
+  existingDataPoint,
+  onCancel,
+  onSaved,
+  featureFlags,
+}: DataPointWizardFormProps) {
+  const flags = featureFlags ?? DEFAULT_FEATURE_FLAGS;
   const [name, setName] = useState(existingDataPoint?.name ?? '');
   const [type, setType] = useState<DataPointType>(existingDataPoint?.type ?? 'number');
   const [unit, setUnit] = useState(existingDataPoint?.unit ?? '');
 
-  const ctx: WizardCtx = { name, setName, type, setType, unit, setUnit };
+  const ctx: WizardCtx = { name, setName, type, setType, unit, setUnit, featureFlags: flags };
 
   const handleComplete = async () => {
     const input = { name: name.trim(), type, unit: type === 'number' && unit ? unit : undefined };
@@ -184,6 +213,7 @@ function DataPointWizardForm({ dataPointService, existingDataPoint, onCancel, on
   );
 }
 
+/** Obsidian Modal wrapper — REQ-D004's two entry points (dashboard + settings tab) both construct this. */
 export class DataPointWizardModal extends Modal {
   private root: Root | null = null;
 
@@ -191,7 +221,8 @@ export class DataPointWizardModal extends Modal {
     app: App,
     private dataPointService: DataPointService,
     private existingDataPoint?: DataPointDefinition,
-    private onSaved?: () => void
+    private onSaved?: () => void,
+    private featureFlags?: FeatureFlags
   ) {
     super(app);
   }
@@ -204,6 +235,7 @@ export class DataPointWizardModal extends Modal {
         <DataPointWizardForm
           dataPointService={this.dataPointService}
           existingDataPoint={this.existingDataPoint}
+          featureFlags={this.featureFlags}
           onCancel={() => this.close()}
           onSaved={() => {
             this.onSaved?.();

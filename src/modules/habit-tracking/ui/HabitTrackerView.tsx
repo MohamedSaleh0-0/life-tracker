@@ -7,6 +7,10 @@
 // view. Requires the plugin's cross-cutting settings store (for the
 // dim-threshold %), so this view now takes that as a constructor param
 // too, threaded from main.ts.
+//
+// Update: Gated by FeatureFlags (REQ-C006) — the overall commitment
+// heatmap is selectively displayed based on habitOverallHeatmap, and
+// flags are passed to the wizard and detail views.
 
 import React, { useEffect, useState } from 'react';
 import { ItemView, WorkspaceLeaf } from 'obsidian';
@@ -19,6 +23,7 @@ import { OverallCommitmentHeatmap } from './OverallCommitmentHeatmap';
 import { HabitService } from '../application/habitService';
 import { HabitDefinition, WeekStartsOn } from '../domain/types';
 import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
 export const VIEW_TYPE_HABIT_TRACKER = 'life-tracker-habits';
 
@@ -33,6 +38,7 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
   const [selected, setSelected] = useState<HabitDefinition | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [dimThreshold, setDimThreshold] = useState(50);
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlags>(DEFAULT_FEATURE_FLAGS);
   const refresh = () => setRefreshKey((k) => k + 1);
 
   useEffect(() => {
@@ -41,7 +47,19 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
   }, [view]);
 
   useEffect(() => {
-    pluginSettingsStore.getHeatmapDimThresholdPercent().then(setDimThreshold);
+    let cancelled = false;
+    Promise.all([
+      pluginSettingsStore.getHeatmapDimThresholdPercent(),
+      pluginSettingsStore.getFeatureFlags(),
+    ]).then(([threshold, flags]) => {
+      if (!cancelled) {
+        setDimThreshold(threshold);
+        setFeatureFlags(flags);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [pluginSettingsStore, refreshKey]);
 
   if (selected) {
@@ -52,6 +70,7 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
         habitService={habitService}
         weekStartsOn={weekStartsOn}
         pluginSettingsStore={pluginSettingsStore}
+        featureFlags={featureFlags}
         onToggleTrendVisible={async (visible) => {
           await habitService.updateHabit(selected.id, { trendVisible: visible });
           setSelected({ ...selected, trendVisible: visible });
@@ -85,7 +104,7 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
             type="button"
             className="ltk-button ltk-button--accent"
             onClick={() =>
-              new HabitWizardModal(view.app, habitService, weekStartsOn, undefined, refresh).open()
+              new HabitWizardModal(view.app, habitService, weekStartsOn, undefined, refresh, featureFlags).open()
             }
           >
             + New habit
@@ -98,12 +117,14 @@ function HabitTrackerRoot({ view, habitService, weekStartsOn, pluginSettingsStor
         onOpenDetail={setSelected}
         pluginSettingsStore={pluginSettingsStore}
       />
-      <OverallCommitmentHeatmap
-        habitService={habitService}
-        weekStartsOn={weekStartsOn}
-        dimThresholdPercent={dimThreshold}
-        refreshKey={refreshKey}
-      />
+      {featureFlags.habitOverallHeatmap && (
+        <OverallCommitmentHeatmap
+          habitService={habitService}
+          weekStartsOn={weekStartsOn}
+          dimThresholdPercent={dimThreshold}
+          refreshKey={refreshKey}
+        />
+      )}
     </div>
   );
 }

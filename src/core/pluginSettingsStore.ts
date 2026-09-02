@@ -2,10 +2,26 @@
 // future cross-cutting toggle) live under their own top-level key in
 // the same settings blob HabitSettingsStore uses for `habits` — same
 // data.json, different key.
+//
+// Update: added the overall-commitment heatmap's dim threshold
+// (habitHeatmapDimThresholdPercent) — the % of a day's scheduled
+// habits below which that day renders at the heatmap's dimmest still-
+// colored shade (0 done habits stays uncolored/grey regardless).
+// Defaults to 50, per the user's ask, and is user-configurable in
+// Settings → Habit Tracking.
+//
+// Update: added prayerLocation for habit reminders (lat/lon +
+// calculation method from Aladhan API).
 
 import { SettingsAdapter } from '../modules/habit-tracking/infrastructure/settingsAdapter';
 import { WeekStartsOn } from '../modules/habit-tracking/domain/types';
 import { PrayerLocation } from './infrastructure/prayerTimeService';
+import {
+  FeatureFlags,
+  DEFAULT_FEATURE_FLAGS,
+  FeaturePreset,
+  FEATURE_PRESETS,
+} from './featureFlags';
 
 const DEFAULT_WEEK_STARTS_ON: WeekStartsOn = 'monday';
 const DEFAULT_HEATMAP_DIM_THRESHOLD_PERCENT = 50;
@@ -28,6 +44,7 @@ interface LifeTrackerData {
   trendWindowDays?: number;
   clockSnapMinutes?: number;
   logFolderOverrides?: { habits?: string; dataPoints?: string; money?: string };
+  featureFlags?: Partial<FeatureFlags>;
   [key: string]: unknown;
 }
 
@@ -143,6 +160,28 @@ export class PluginSettingsStore {
   async setLogFolderOverride(module: 'habits' | 'dataPoints' | 'money', path: string): Promise<void> {
     const d = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
     d.logFolderOverrides = { ...(d.logFolderOverrides ?? {}), [module]: path };
+    await this.adapter.save(d);
+  }
+
+  // --- Feature Flags (REQ-C006/REQ-C007) ---
+
+  async getFeatureFlags(): Promise<FeatureFlags> {
+    const d = (await this.adapter.load()) as LifeTrackerData | null;
+    // Merge over defaults so a flag added in a future version of the
+    // plugin (not yet in an existing user's saved data) still reads as
+    // its sensible default rather than `undefined`.
+    return { ...DEFAULT_FEATURE_FLAGS, ...(d?.featureFlags ?? {}) };
+  }
+
+  async setFeatureFlag<K extends keyof FeatureFlags>(key: K, value: FeatureFlags[K]): Promise<void> {
+    const d = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    d.featureFlags = { ...(d.featureFlags ?? {}), [key]: value };
+    await this.adapter.save(d);
+  }
+
+  async applyFeaturePreset(preset: FeaturePreset): Promise<void> {
+    const d = ((await this.adapter.load()) as LifeTrackerData | null) ?? {};
+    d.featureFlags = { ...FEATURE_PRESETS[preset] };
     await this.adapter.save(d);
   }
 }

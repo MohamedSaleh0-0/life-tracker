@@ -11,6 +11,10 @@
 // (e.g. "Routine A" / "Routine B" / "Routine C") instead of yes/no or
 // a number. The type step now includes an inline level-list editor
 // (add/remove/reorder, at least 2 required) when 'levels' is chosen.
+//
+// Update: Gated by FeatureFlags (REQ-C006) — the reminder step and
+// the 'levels' type option are only included when their respective flags
+// are enabled.
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -20,6 +24,7 @@ import { ErrorBoundary } from '../../../shared/ui-kit/ErrorBoundary';
 import { HabitService, NewHabitInput } from '../application/habitService';
 import { HabitDefinition, HabitLevel, HabitSchedule, WeekStartsOn, HabitReminder, PrayerName } from '../domain/types';
 import { weekStartInternalIndex } from '../domain/scheduleEvaluator';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
 function describeSchedule(schedule: HabitSchedule): string {
   switch (schedule.mode) {
@@ -145,6 +150,7 @@ interface WizardCtx {
   reminder?: HabitReminder;
   setReminder: (v: HabitReminder | undefined) => void;
   weekStartsOn: WeekStartsOn;
+  featureFlags: FeatureFlags;
 }
 
 const WizardContext = createContext<WizardCtx | null>(null);
@@ -183,7 +189,7 @@ function NameStep({ onValidChange }: WizardStepProps) {
 }
 
 function TypeStep({ onValidChange }: WizardStepProps) {
-  const { type, setType, targetValue, setTargetValue, targetUnit, setTargetUnit, levels, setLevels } = useWizardCtx();
+  const { type, setType, targetValue, setTargetValue, targetUnit, setTargetUnit, levels, setLevels, featureFlags } = useWizardCtx();
 
   useEffect(() => {
     if (type === 'levels') {
@@ -213,10 +219,12 @@ function TypeStep({ onValidChange }: WizardStepProps) {
         <input type="radio" checked={type === 'numeric'} onChange={() => setType('numeric')} />
         Numeric
       </label>
-      <label>
-        <input type="radio" checked={type === 'levels'} onChange={switchToLevels} />
-        Custom levels (pick one of several named options each day)
-      </label>
+      {featureFlags.habitLevelsType && (
+        <label>
+          <input type="radio" checked={type === 'levels'} onChange={switchToLevels} />
+          Custom levels (pick one of several named options each day)
+        </label>
+      )}
       {type === 'numeric' && (
         <div className="ltk-wizard-step__target">
           <label>
@@ -442,13 +450,18 @@ function ReminderStep({ onValidChange }: WizardStepProps) {
   );
 }
 
-const WIZARD_STEPS: WizardStep[] = [
-  { id: 'name', title: 'Name & look', component: NameStep },
-  { id: 'type', title: 'Type', component: TypeStep },
-  { id: 'schedule', title: 'Schedule', component: ScheduleStep },
-  { id: 'reminder', title: 'Reminder', component: ReminderStep },
-  { id: 'review', title: 'Review', component: ReviewStep },
-];
+function buildWizardSteps(flags: FeatureFlags): WizardStep[] {
+  const steps: WizardStep[] = [
+    { id: 'name', title: 'Name & look', component: NameStep },
+    { id: 'type', title: 'Type', component: TypeStep },
+    { id: 'schedule', title: 'Schedule', component: ScheduleStep },
+  ];
+  if (flags.habitReminders) {
+    steps.push({ id: 'reminder', title: 'Reminder', component: ReminderStep });
+  }
+  steps.push({ id: 'review', title: 'Review', component: ReviewStep });
+  return steps;
+}
 
 // ---- Form + Modal --------------------------------------------------------
 
@@ -458,9 +471,18 @@ interface HabitWizardFormProps {
   weekStartsOn: WeekStartsOn;
   onCancel: () => void;
   onSaved: () => void;
+  featureFlags?: FeatureFlags;
 }
 
-function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, onSaved }: HabitWizardFormProps) {
+function HabitWizardForm({
+  habitService,
+  existingHabit,
+  weekStartsOn,
+  onCancel,
+  onSaved,
+  featureFlags,
+}: HabitWizardFormProps) {
+  const flags = featureFlags ?? DEFAULT_FEATURE_FLAGS;
   const [name, setName] = useState(existingHabit?.name ?? '');
   const [icon, setIcon] = useState(existingHabit?.icon ?? '⭐');
   const [color, setColor] = useState(existingHabit?.color ?? '#3b82f6');
@@ -493,6 +515,7 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
     reminder,
     setReminder,
     weekStartsOn,
+    featureFlags: flags,
   };
 
   const handleComplete = async () => {
@@ -504,7 +527,7 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
       schedule,
       target: type === 'numeric' && targetValue ? { value: Number(targetValue), unit: targetUnit } : undefined,
       levels: type === 'levels' ? levels.map((l, i) => ({ ...l, label: l.label.trim(), order: i })) : undefined,
-      reminder,
+      reminder: flags.habitReminders ? reminder : undefined,
     };
 
     if (existingHabit) {
@@ -515,10 +538,12 @@ function HabitWizardForm({ habitService, existingHabit, weekStartsOn, onCancel, 
     onSaved();
   };
 
+  const steps = buildWizardSteps(flags);
+
   return (
     <WizardContext.Provider value={ctx}>
       <StepWizard
-        steps={WIZARD_STEPS}
+        steps={steps}
         onComplete={handleComplete}
         onCancel={onCancel}
         completeLabel={existingHabit ? 'Save' : 'Create'}
@@ -536,7 +561,8 @@ export class HabitWizardModal extends Modal {
     private habitService: HabitService,
     private weekStartsOn: WeekStartsOn,
     private existingHabit?: HabitDefinition,
-    private onSaved?: () => void
+    private onSaved?: () => void,
+    private featureFlags?: FeatureFlags
   ) {
     super(app);
   }
@@ -551,6 +577,7 @@ export class HabitWizardModal extends Modal {
           habitService={this.habitService}
           existingHabit={this.existingHabit}
           weekStartsOn={this.weekStartsOn}
+          featureFlags={this.featureFlags}
           onCancel={() => this.close()}
           onSaved={() => {
             this.onSaved?.();

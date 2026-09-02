@@ -13,6 +13,9 @@
 // tooltip — previously boolean days carried no `label` at all, so the
 // (now-fixed) hover tooltip fell back to showing only the bare date
 // with no indication of what happened that day.
+//
+// Update: Gated by FeatureFlags (REQ-C006) — the commitment phase
+// actions render only when habitCommitmentPhase is enabled.
 
 import React, { useEffect, useState } from 'react';
 import { App, Modal } from 'obsidian';
@@ -24,6 +27,7 @@ import { getTodayLocal, addDaysLocal } from '../../../core/date';
 import { HabitDeleteConfirmModal } from './HabitDeleteConfirmModal';
 import { HabitWizardModal } from './HabitWizardModal';
 import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
 export interface HabitDetailViewProps {
   app: App; // needed to open HabitDeleteConfirmModal / HabitWizardModal
@@ -36,6 +40,7 @@ export interface HabitDetailViewProps {
    */
   weekStartsOn: WeekStartsOn;
   pluginSettingsStore?: PluginSettingsStore;
+  featureFlags?: FeatureFlags;
   onToggleTrendVisible: (visible: boolean) => void;
   /** Plain "go back to the list" with no side effect — the missing piece before this fix: previously the only way out of detail view was edit/archive/delete. */
   onBack: () => void;
@@ -88,12 +93,14 @@ export function HabitDetailView({
   habitService,
   weekStartsOn,
   pluginSettingsStore,
+  featureFlags,
   onToggleTrendVisible,
   onBack,
   onEdited,
   onDeleted,
   onArchived,
 }: HabitDetailViewProps) {
+  const flags = featureFlags ?? DEFAULT_FEATURE_FLAGS;
   const [history, setHistory] = useState<HabitHistoryResult | null>(null);
   const [rangeStart, setRangeStart] = useState<string>(() => addDaysLocal(getTodayLocal(), -90));
 
@@ -166,7 +173,7 @@ export function HabitDetailView({
   const best = numericValues.length > 0 ? Math.max(...numericValues) : 0;
 
   const handleEditClick = () => {
-    new HabitWizardModal(app, habitService, weekStartsOn, habit, onEdited).open();
+    new HabitWizardModal(app, habitService, weekStartsOn, habit, onEdited, flags).open();
   };
 
   const handleDeleteClick = async () => {
@@ -331,10 +338,12 @@ export function HabitDetailView({
         <button type="button" onClick={handleEditClick}>
           Edit
         </button>
-        <button type="button" onClick={handleStartNewCommitmentPhase}>
-          Start new commitment phase
-        </button>
-        {habit.commitmentStartDate && (
+        {flags.habitCommitmentPhase && (
+          <button type="button" onClick={handleStartNewCommitmentPhase}>
+            Start new commitment phase
+          </button>
+        )}
+        {flags.habitCommitmentPhase && habit.commitmentStartDate && (
           <button
             type="button"
             onClick={async () => {

@@ -25,6 +25,8 @@
 //    list itself.
 //  - Transaction rows show an Essential/Judgment badge when set, with
 //    an "Edit tags" action to set/change them after the fact.
+//  - FeatureFlags (REQ-C006): selectively toggles the Debts section,
+//    Recurring entries, and Essential/Judgment tag badges.
 
 import React, { useEffect, useState } from 'react';
 import { ItemView, WorkspaceLeaf } from 'obsidian';
@@ -42,6 +44,7 @@ import { Account, RecurringEntry, ShoppingList, Transaction, JUDGMENT_OPTIONS, D
 import { debtRemaining } from '../domain/debtCalculator';
 import { getTodayLocal, addDaysLocal } from '../../../core/date';
 import { PluginSettingsStore } from '../../../core/pluginSettingsStore';
+import { FeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../../core/featureFlags';
 
 export const VIEW_TYPE_MONEY_TRACKER = 'life-tracker-money';
 
@@ -74,6 +77,7 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
   const [debts, setDebts] = useState<Debt[]>([]);
   const [debtTotals, setDebtTotals] = useState<{ owedToMe: number; iOwe: number }>({ owedToMe: 0, iOwe: 0 });
   const [debtRemainingById, setDebtRemainingById] = useState<Map<string, number>>(new Map());
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlags>(DEFAULT_FEATURE_FLAGS);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
@@ -92,6 +96,7 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
     (async () => {
       try {
         const windowDays = pluginSettingsStore ? await pluginSettingsStore.getRecentTransactionsWindowDays() : 30;
+        const flags = pluginSettingsStore ? await pluginSettingsStore.getFeatureFlags() : DEFAULT_FEATURE_FLAGS;
         const rangeStart = addDaysLocal(getTodayLocal(), -windowDays);
         const rangeEnd = getTodayLocal();
         const [withBalances, worth, rates, recentTxs, archivedTxs, due, lists, allDebts] = await Promise.all([
@@ -106,6 +111,7 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
         ]);
         if (cancelled) return;
 
+        setFeatureFlags(flags);
         setLoadError(null);
         setAccountsWithBalances(withBalances);
         setNetWorth(worth);
@@ -164,7 +170,7 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
     // otherwise stayed disabled (or opened with an empty account list)
     // right after creating the first account elsewhere.
     const freshAccounts = await moneyService.getAccounts();
-    new TransactionEntryModal(view.app, moneyService, freshAccounts, refresh, pluginSettingsStore).open();
+    new TransactionEntryModal(view.app, moneyService, freshAccounts, refresh, pluginSettingsStore, featureFlags).open();
   };
 
   const handleArchiveTransaction = async (t: Transaction) => {
@@ -207,8 +213,10 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
           {description}
           {t.categoryId && <span className="ltk-money-tx__category"> · {categoryLabels.get(t.categoryId) ?? '…'}</span>}
           {t.refundOfTransactionId && <span className="ltk-money-tx__tag"> refund</span>}
-          {t.essential === true && <span className="ltk-money-tx__tag ltk-money-tx__tag--essential"> essential</span>}
-          {t.essential === false && t.judgment && (
+          {featureFlags.moneyEssentialJudgment && t.essential === true && (
+            <span className="ltk-money-tx__tag ltk-money-tx__tag--essential"> essential</span>
+          )}
+          {featureFlags.moneyEssentialJudgment && t.essential === false && t.judgment && (
             <span className="ltk-money-tx__tag ltk-money-tx__tag--judgment"> {judgmentLabel(t.judgment)}</span>
           )}
         </span>
@@ -227,7 +235,7 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
             <button type="button" onClick={() => handleArchiveTransaction(t)}>
               Archive
             </button>
-            {t.type === 'expense' && (
+            {featureFlags.moneyEssentialJudgment && t.type === 'expense' && (
               <button type="button" onClick={() => new TransactionTagsModal(view.app, moneyService, t, refresh).open()}>
                 Edit tags
               </button>
@@ -265,7 +273,7 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
         <p className="ltk-empty">No accounts yet — add one in Settings → Life Tracker → Money Management.</p>
       )}
 
-      {dueRecurring.length > 0 && (
+      {featureFlags.moneyRecurringEntries && dueRecurring.length > 0 && (
         <div className="ltk-money-due">
           <h3>Needs attention</h3>
           {dueRecurring.map((entry) => (
@@ -347,42 +355,46 @@ function MoneyTrackerRoot({ view, moneyService, pluginSettingsStore }: MoneyTrac
         </div>
       )}
 
-      <div className="ltk-money-section-header">
-        <h3>Debts</h3>
-        <button type="button" onClick={() => new DebtModal(view.app, moneyService, undefined, refresh).open()}>
-          + New debt
-        </button>
-      </div>
-      {(debtTotals.owedToMe > 0 || debtTotals.iOwe > 0) && (
-        <div className="ltk-money-networth">
-          <span className="ltk-money-networth__label">Owed to you</span>
-          <span className="ltk-money-networth__value">{debtTotals.owedToMe.toFixed(2)}</span>
-          <span className="ltk-money-networth__label">You owe</span>
-          <span className="ltk-money-networth__value">{debtTotals.iOwe.toFixed(2)}</span>
-        </div>
-      )}
-      {debts.length === 0 && <p className="ltk-empty">No debts tracked.</p>}
-      {debts.length > 0 && (
-        <div className="ltk-shopping-lists">
-          {debts.map((debt) => {
-            const remaining = debtRemainingById.get(debt.id) ?? debt.principal;
-            return (
-              <div
-                key={debt.id}
-                className="ltk-shopping-list-card"
-                onClick={() => new DebtDetailModal(view.app, moneyService, debt, accounts, refresh).open()}
-              >
-                <span className="ltk-shopping-list-card__name">
-                  {debt.direction === 'owed_to_me' ? '← ' : '→ '}
-                  {debt.counterparty}
-                </span>
-                <span className="ltk-shopping-list-card__summary">
-                  {remaining <= 0 ? 'Settled' : `${remaining.toFixed(2)} remaining`}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+      {featureFlags.moneyDebts && (
+        <>
+          <div className="ltk-money-section-header">
+            <h3>Debts</h3>
+            <button type="button" onClick={() => new DebtModal(view.app, moneyService, undefined, refresh).open()}>
+              + New debt
+            </button>
+          </div>
+          {(debtTotals.owedToMe > 0 || debtTotals.iOwe > 0) && (
+            <div className="ltk-money-networth">
+              <span className="ltk-money-networth__label">Owed to you</span>
+              <span className="ltk-money-networth__value">{debtTotals.owedToMe.toFixed(2)}</span>
+              <span className="ltk-money-networth__label">You owe</span>
+              <span className="ltk-money-networth__value">{debtTotals.iOwe.toFixed(2)}</span>
+            </div>
+          )}
+          {debts.length === 0 && <p className="ltk-empty">No debts tracked.</p>}
+          {debts.length > 0 && (
+            <div className="ltk-shopping-lists">
+              {debts.map((debt) => {
+                const remaining = debtRemainingById.get(debt.id) ?? debt.principal;
+                return (
+                  <div
+                    key={debt.id}
+                    className="ltk-shopping-list-card"
+                    onClick={() => new DebtDetailModal(view.app, moneyService, debt, accounts, refresh).open()}
+                  >
+                    <span className="ltk-shopping-list-card__name">
+                      {debt.direction === 'owed_to_me' ? '← ' : '→ '}
+                      {debt.counterparty}
+                    </span>
+                    <span className="ltk-shopping-list-card__summary">
+                      {remaining <= 0 ? 'Settled' : `${remaining.toFixed(2)} remaining`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
       <div className="ltk-money-section-header">
